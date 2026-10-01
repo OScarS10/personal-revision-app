@@ -427,10 +427,10 @@ describe("generators are registered on the client", () => {
     const modules = readdirSync("src/lib/generators")
       .filter((f) => f.startsWith("aqa-") || f.startsWith("edexcel-") || f.startsWith("ocr-"))
       .map((f) => f.replace(/\.ts$/, ""));
-    for (const module of modules) {
+    for (const name of modules) {
       assert.ok(
-        barrel.includes(`@/lib/generators/${module}"`),
-        `${module} is not imported by the generator barrel, so it will not reach the browser`,
+        barrel.includes(`@/lib/generators/${name}"`),
+        `${name} is not imported by the generator barrel, so it will not reach the browser`,
       );
     }
   });
