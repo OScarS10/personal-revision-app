@@ -1,0 +1,15 @@
+# Excluded from the Vercel deployment.
+
+# The deployment builds and runs the app; it does not need the test and
+# diagnostic tooling. Excluding these keeps the upload small and stops the
+# build step from type-checking files the learner never loads.
+tests
+scripts
+AGENTS.md
+CLAUDE.md
+tsconfig.tsbuildinfo
+
+# Build output. Vercel regenerates this, and uploading it is both wasteful and
+# a source of stale-cache confusion.
+.next
+.vercel

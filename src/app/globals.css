@@ -1,0 +1,478 @@
+@import "tailwindcss";
+
+/*
+  Specwise design tokens.
+
+  The visual language is borrowed from printed study guides: warm paper, ink,
+  hairline rules, a text serif for headings and tabular figures for anything
+  numeric. Nothing here is decorative - colour is reserved for state
+  (correct / incorrect / warning) so it always carries meaning.
+*/
+
+:root {
+  color-scheme: light;
+
+  --paper: #f7f6f2;
+  --surface: #fffefa;
+  --surface-2: #f0eee8;
+  --surface-3: #e7e4dc;
+
+  --ink: #17170f;
+  --ink-2: #55534a;
+  --ink-3: #8a877c;
+
+  --rule: #e3e0d7;
+  --rule-2: #cecabd;
+
+  --accent: #1f4d7a;
+  --accent-2: #2c6a9e;
+  --accent-soft: #e7eef5;
+
+  --ok: #2c6a45;
+  --ok-soft: #e4efe7;
+  --bad: #9e2b25;
+  --bad-soft: #f8e9e6;
+  --warn: #8a5a10;
+  --warn-soft: #f7f0e0;
+
+  --focus: #1f4d7a;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+
+    --paper: #15140f;
+    --surface: #1d1c16;
+    --surface-2: #25241d;
+    --surface-3: #2f2d25;
+
+    --ink: #ece9df;
+    --ink-2: #a8a498;
+    --ink-3: #7a766a;
+
+    --rule: #302e26;
+    --rule-2: #454238;
+
+    --accent: #85b3e0;
+    --accent-2: #a3c8ec;
+    --accent-soft: #1a2531;
+
+    --ok: #74c08f;
+    --ok-soft: #182a20;
+    --bad: #e2908a;
+    --bad-soft: #2c1a18;
+    --warn: #d0a55c;
+    --warn-soft: #2a2214;
+
+    --focus: #85b3e0;
+  }
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+
+  --color-rule: var(--rule);
+  --color-rule-2: var(--rule-2);
+
+  --color-accent: var(--accent);
+  --color-accent-2: var(--accent-2);
+  --color-accent-soft: var(--accent-soft);
+
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-bad: var(--bad);
+  --color-bad-soft: var(--bad-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+
+  --font-sans: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-serif), Georgia, "Times New Roman", serif;
+  --font-mono: var(--font-mono), ui-monospace, "SFMono-Regular", monospace;
+}
+
+* {
+  border-color: var(--rule);
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+/* Visible, consistent focus ring for keyboard users only. */
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* ---------------------------------------------------------------- typography */
+
+.font-display {
+  font-family: var(--font-serif), Georgia, serif;
+  font-weight: 500;
+  letter-spacing: -0.011em;
+}
+
+/*
+  Small-caps section label. Used for the "01 / PRACTICE" style eyebrows that
+  structure the page without shouting.
+*/
+.label {
+  font-family: var(--font-sans), sans-serif;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+/* Numerals must line up in columns, so always use tabular figures. */
+.num {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+.spec-ref {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 11.5px;
+  color: var(--ink-3);
+  letter-spacing: -0.01em;
+}
+
+.prose-note {
+  color: var(--ink-2);
+  line-height: 1.6;
+}
+
+mark {
+  background: var(--warn-soft);
+  color: var(--ink);
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+/* ------------------------------------------------------------------- layout */
+
+.rule-top {
+  border-top: 1px solid var(--rule);
+}
+
+.page {
+  width: 100%;
+  max-width: 68rem;
+  margin-inline: auto;
+  padding-inline: 1.25rem;
+}
+
+.page-wide {
+  width: 100%;
+  max-width: 80rem;
+  margin-inline: auto;
+  padding-inline: 1.25rem;
+}
+
+@media (min-width: 768px) {
+  .page {
+    padding-inline: 2rem;
+  }
+  .page-wide {
+    padding-inline: 2.5rem;
+  }
+}
+
+/* ------------------------------------------------------------------ widgets */
+
+/*
+  Flat panel. Deliberately no shadow and almost no radius: the hierarchy comes
+  from the rule lines, not from elevation.
+*/
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+}
+
+.panel-inset {
+  background: var(--surface-2);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+}
+
+/* Keyboard hint chip shown in the corner of an option. */
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding-inline: 0.25rem;
+  font-family: var(--font-mono), monospace;
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--ink-3);
+  background: var(--surface-2);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.9rem;
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: 1.2;
+  border: 1px solid var(--rule-2);
+  border-radius: 3px;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+  white-space: nowrap;
+}
+.btn:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--paper);
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--ink-2);
+  border-color: var(--ink-2);
+}
+
+.btn-accent {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.btn-accent:hover:not(:disabled) {
+  background: var(--accent-2);
+  border-color: var(--accent-2);
+}
+
+.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--ink-2);
+}
+.btn-ghost:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.btn-sm {
+  padding: 0.3rem 0.6rem;
+  font-size: 12.5px;
+}
+
+.field {
+  width: 100%;
+  padding: 0.55rem 0.7rem;
+  font-size: 14px;
+  font-family: var(--font-mono), monospace;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--rule-2);
+  border-radius: 3px;
+}
+.field::placeholder {
+  color: var(--ink-3);
+  font-family: var(--font-sans), sans-serif;
+}
+
+.field-lg {
+  padding: 0.8rem 0.9rem;
+  font-size: 17px;
+  line-height: 1.4;
+}
+
+/* Selectable option row in a multiple-choice question. */
+.option {
+  display: flex;
+  width: 100%;
+  align-items: flex-start;
+  gap: 0.7rem;
+  padding: 0.65rem 0.8rem;
+  text-align: left;
+  font-size: 14px;
+  line-height: 1.5;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background-color 100ms ease, border-color 100ms ease;
+}
+.option:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+.option[data-selected="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.option[data-state="correct"] {
+  border-color: var(--ok);
+  background: var(--ok-soft);
+}
+.option[data-state="wrong"] {
+  border-color: var(--bad);
+  background: var(--bad-soft);
+}
+.option:disabled {
+  cursor: default;
+}
+
+/* ------------------------------------------------------------------- meters */
+
+/*
+  Mastery / confidence meter. A hairline trough with a solid fill, so it reads
+  as a measurement rather than a progress bar.
+*/
+.meter {
+  position: relative;
+  height: 5px;
+  width: 100%;
+  background: var(--surface-3);
+  border-radius: 1px;
+  overflow: hidden;
+}
+.meter > span {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  background: var(--accent);
+  border-radius: 1px;
+}
+.meter[data-tone="ok"] > span {
+  background: var(--ok);
+}
+.meter[data-tone="warn"] > span {
+  background: var(--warn);
+}
+.meter[data-tone="bad"] > span {
+  background: var(--bad);
+}
+.meter[data-tone="muted"] > span {
+  background: var(--ink-3);
+}
+
+/* Unattempted meters get a faint diagonal hatch instead of an empty track. */
+.meter[data-empty="true"] {
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--surface-3),
+    var(--surface-3) 3px,
+    var(--surface-2) 3px,
+    var(--surface-2) 6px
+  );
+}
+
+/* --------------------------------------------------------------- animations */
+
+@keyframes fade-rise {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animate-in {
+  animation: fade-rise 180ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-in {
+    animation: none;
+  }
+  * {
+    transition-duration: 1ms !important;
+  }
+}
+
+/* --------------------------------------------------------------------- KaTeX */
+
+/*
+  KaTeX ships its own font stack and line-height. Pull it in line with the
+  surrounding body copy so that a line of maths sits on the same baseline grid
+  as a line of prose.
+*/
+.katex {
+  font-size: 1.04em;
+  line-height: normal;
+}
+.katex-display {
+  margin: 0.85em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.15em 0;
+}
+.katex-display > .katex {
+  font-size: 1.1em;
+}
+
+/* Bare maths inside a paragraph should wrap rather than overflow. */
+.math-inline {
+  overflow-wrap: break-word;
+}
+
+/* Code, for the Computer Science trace-table and code answers. */
+pre.code {
+  margin: 0;
+  padding: 0.75rem 0.9rem;
+  overflow-x: auto;
+  font-family: var(--font-mono), monospace;
+  font-size: 12.5px;
+  line-height: 1.6;
+  background: var(--surface-2);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  color: var(--ink);
+}
+code.inline {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.9em;
+  padding: 0.1em 0.3em;
+  background: var(--surface-2);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+}
