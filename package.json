@@ -16,7 +16,7 @@
     "report:selector": "tsx scripts/report-selector.ts",
     "check:browser": "tsx scripts/check-browser.ts",
     "check:layout": "tsx scripts/audit-layout.ts",
-    "preview": "npm run build && tsx scripts/serve-static.ts",
+    "preview": "npm run build && next start",
     "db:migrate": "tsx scripts/migrate.ts"
   },
   "dependencies": {
