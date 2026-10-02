@@ -4,7 +4,11 @@
 # diagnostic tooling. Excluding these keeps the upload small and stops the
 # build step from type-checking files the learner never loads.
 tests
-scripts
+scripts/*
+# ...but `npm run build` ends by stamping the service-worker cache id, so this
+# one script has to survive the upload. Excluding the directory outright cannot
+# be undone by a negation, which is why the line above ignores its contents.
+!scripts/stamp-service-worker.ts
 AGENTS.md
 CLAUDE.md
 tsconfig.tsbuildinfo
