@@ -14,6 +14,7 @@ import {
   nextDifficulty,
   nextQuestion,
   planSession,
+  restrictQueue,
   type SessionMode,
   type SessionPlan,
 } from "@/lib/session";
@@ -189,7 +190,18 @@ export function useSession(options: UseSessionOptions): SessionApi {
     [seed, mode, length],
   );
 
-  const total = plan.queue.length > 0 ? plan.queue.length : null;
+  /*
+    The plan above is deliberately frozen, so it does not notice the learner
+    narrowing their selection. Restricting it here is what stops a chapter that
+    was switched off from still being served, and filtering rather than
+    replanning keeps the order of the chapters that remain.
+  */
+  const liveQueue = useMemo(
+    () => restrictQueue(plan.queue, enabledIds),
+    [plan.queue, enabledIds],
+  );
+
+  const total = liveQueue.length > 0 ? liveQueue.length : null;
 
   /**
    * Build the question for a given queue position.
@@ -206,8 +218,8 @@ export function useSession(options: UseSessionOptions): SessionApi {
       sessionSeed: string,
       recentTemplates: string[],
     ): SessionEntry | null => {
-      if (plan.queue.length === 0) return null;
-      const chapterId = plan.queue[position % plan.queue.length];
+      if (liveQueue.length === 0) return null;
+      const chapterId = liveQueue[position % liveQueue.length];
       const chapter = getChapter(chapterId);
       if (!chapter) return null;
 
@@ -242,7 +254,7 @@ export function useSession(options: UseSessionOptions): SessionApi {
         bookmarked: false,
       };
     },
-    [plan.queue, state.skills, state.config.stretch, state.config.difficulty, state.templateStats],
+    [liveQueue, state.skills, state.config.stretch, state.config.difficulty, state.templateStats],
   );
 
   // The first question is derived, not something an effect has to push in after
@@ -332,9 +344,10 @@ export function useSession(options: UseSessionOptions): SessionApi {
   }, [index]);
 
   const next = useCallback(() => {
-    if (plan.queue.length === 0) return;
+    // An empty queue means every planned chapter has since been switched off.
+    // Ending is the honest outcome; carrying on would need a chapter to serve.
     const position = index + 1;
-    if (position >= plan.queue.length) {
+    if (liveQueue.length === 0 || position >= liveQueue.length) {
       setFinished(true);
       options.onFinish();
       return;
@@ -351,7 +364,7 @@ export function useSession(options: UseSessionOptions): SessionApi {
       setEntries((cur) => (cur[position] ? cur : [...cur, built]));
     }
     setIndex(position);
-  }, [index, entries, plan.queue.length, build, seed, recentTemplates, options]);
+  }, [index, entries, liveQueue.length, build, seed, recentTemplates, options]);
 
   const undo = useCallback(() => {
     setEntries((prev) => {

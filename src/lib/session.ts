@@ -167,6 +167,30 @@ export function planSession(options: PlanOptions): SessionPlan {
   };
 }
 
+/**
+ * Narrow a frozen session queue to the chapters that are still enabled.
+ *
+ * A session's queue is planned once and deliberately not rebuilt while it runs,
+ * so the learner does not watch the chapter order shuffle under them. The cost
+ * of that stability is that the queue cannot notice the selection narrowing
+ * underneath it: a queue planned while sixteen chapters were enabled kept
+ * serving 1.4.1 long after the learner had cut the selection to a single
+ * chapter, because nothing re-derived the plan.
+ *
+ * Filtering at build time fixes that without giving up the stable order, since
+ * this drops entries rather than reordering them. Widening the selection
+ * mid-session still needs no effect here: the new chapters are not in the
+ * planned queue and so arrive with the next session, which is the same promise
+ * the frozen plan already makes.
+ *
+ * An empty result is returned rather than the original queue, so nothing can be
+ * served from a chapter the learner has switched off.
+ */
+export function restrictQueue(queue: readonly string[], enabledIds: readonly string[]): string[] {
+  const enabled = new Set(enabledIds);
+  return queue.filter((id) => enabled.has(id));
+}
+
 // ------------------------------------------------------------- adaptive thread
 
 /**
