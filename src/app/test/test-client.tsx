@@ -9,6 +9,12 @@ import { useStore } from "@/components/store-provider";
 import { SessionRunner } from "@/components/session-runner";
 import { ChapterPicker } from "@/components/chapter-picker";
 import { PageHeader, SectionHead, Segmented } from "@/components/ui";
+import {
+  DIFFICULTY_HINT,
+  DIFFICULTY_LABEL,
+  DIFFICULTY_PREFERENCES,
+  type DifficultyPreference,
+} from "@/lib/difficulty";
 import { fmtDuration } from "@/components/format";
 
 /*
@@ -27,7 +33,7 @@ const QUESTION_COUNTS = [10, 20, 40] as const;
 
 export function TestPage() {
   const router = useRouter();
-  const { state, recordAnswer, toggleChapter, setChapters } = useStore();
+  const { state, recordAnswer, toggleChapter, setChapters, setDifficulty } = useStore();
 
   const [subject, setSubject] = useState<SubjectId>("edexcel-mathematics");
   const [paperId, setPaperId] = useState<string>("");
@@ -145,6 +151,19 @@ export function TestPage() {
             this is a subset of {suggestedCount}.
           </p>
         ) : null}
+      </div>
+
+      <div className="panel mb-6">
+        <span className="label">Difficulty</span>
+        <Segmented
+          onChange={(v) => setDifficulty(v as DifficultyPreference)}
+          options={DIFFICULTY_PREFERENCES.map((p) => ({
+            value: p,
+            label: DIFFICULTY_LABEL[p],
+          }))}
+          value={state.config.difficulty}
+        />
+        <p className="prose-note mt-2">{DIFFICULTY_HINT[state.config.difficulty]}</p>
       </div>
 
       <SectionHead

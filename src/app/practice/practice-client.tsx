@@ -9,6 +9,12 @@ import { useStore } from "@/components/store-provider";
 import { SessionRunner } from "@/components/session-runner";
 import { ChapterPicker } from "@/components/chapter-picker";
 import { PageHeader, SectionHead, Segmented } from "@/components/ui";
+import {
+  DIFFICULTY_HINT,
+  DIFFICULTY_LABEL,
+  DIFFICULTY_PREFERENCES,
+  type DifficultyPreference,
+} from "@/lib/difficulty";
 
 /*
   Practice setup.
@@ -23,7 +29,7 @@ const LENGTHS = [5, 10, 15, 25] as const;
 export function PracticePage() {
   const router = useRouter();
   const params = useSearchParams();
-  const { state, toggleChapter, setChapters, recordAnswer, undoLastAnswer } = useStore();
+  const { state, toggleChapter, setChapters, setDifficulty, recordAnswer, undoLastAnswer } = useStore();
 
   const [length, setLength] = useState<number>(10);
   const [search, setSearch] = useState("");
@@ -174,6 +180,18 @@ export function PracticePage() {
               {enabled.length} chapter{enabled.length === 1 ? "" : "s"} in this subject will be drawn
               from, weighted towards what you are weakest at.
             </p>
+          </div>
+          <div>
+            <span className="label">Difficulty</span>
+            <Segmented
+              onChange={(v) => setDifficulty(v as DifficultyPreference)}
+              options={DIFFICULTY_PREFERENCES.map((p) => ({
+                value: p,
+                label: DIFFICULTY_LABEL[p],
+              }))}
+              value={state.config.difficulty}
+            />
+            <p className="prose-note mt-2">{DIFFICULTY_HINT[state.config.difficulty]}</p>
           </div>
         </div>
       </div>

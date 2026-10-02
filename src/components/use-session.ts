@@ -212,13 +212,15 @@ export function useSession(options: UseSessionOptions): SessionApi {
       if (!chapter) return null;
 
       // Difficulty reacts to how the learner has done *in this session*, plus
-      // their established ability for the chapter.
+      // their established ability for the chapter, plus the difficulty they
+      // chose in the UI.
       const skill = state.skills[chapterId] ?? createSkillState();
       const target = nextDifficulty(
         skill.theta,
         priorAnswers,
         state.config.stretch,
         seededRandom(`${sessionSeed}::${position}::${chapterId}`),
+        state.config.difficulty,
       );
 
       const question = nextQuestion(
@@ -240,7 +242,7 @@ export function useSession(options: UseSessionOptions): SessionApi {
         bookmarked: false,
       };
     },
-    [plan.queue, state.skills, state.config.stretch, state.templateStats],
+    [plan.queue, state.skills, state.config.stretch, state.config.difficulty, state.templateStats],
   );
 
   // The first question is derived, not something an effect has to push in after

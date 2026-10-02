@@ -89,7 +89,7 @@ export function BackupPrompt() {
   if (!hydrated || status.urgency === "none") return null;
 
   const tone =
-    status.urgency === "overdue" ? "border-warn" : "border-line";
+    status.urgency === "overdue" ? "border-warn" : "border-rule";
 
   return (
     <div className={`panel ${tone} mb-6 flex flex-wrap items-center gap-3 p-3`}>

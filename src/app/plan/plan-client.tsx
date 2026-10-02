@@ -81,7 +81,7 @@ export function PlanPage() {
             // not "1", however much of Wednesday has already passed.
             const days = at ? daysBetween(now, at) : null;
             return (
-              <div key={subject} className="border border-line p-3">
+              <div key={subject} className="border border-rule p-3">
                 <span className="text-[14px]">{SUBJECTS[subject].shortName}</span>
                 <div className="mt-1.5">
                   {days === null ? (
@@ -178,7 +178,7 @@ export function PlanPage() {
                 hint={plan.dueToday.length > 0 ? "see the review page" : undefined}
               />
             </div>
-            <ul className="divide-y divide-line">
+            <ul className="divide-y divide-rule">
               {tasks.map((task, i) => (
                 <li key={task.chapterId} className="flex items-center gap-4 py-3">
                   <span className="num text-ink-3 text-[12px] w-4">{i + 1}</span>
@@ -234,7 +234,7 @@ export function PlanPage() {
           />
         </div>
       ) : (
-        <div className="panel divide-y divide-line">
+        <div className="panel divide-y divide-rule">
           {notebook.slice(0, 6).map((entry) => (
             <div key={`${entry.questionId}-${entry.at}`} className="flex items-center gap-3 py-2.5">
               <span className="spec-ref shrink-0">{entry.specRef}</span>

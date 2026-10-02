@@ -326,7 +326,7 @@ function QuestionBody(props: QuestionViewProps) {
               <span className="label">
                 Mark scheme — tick what your answer actually says
               </span>
-              <ul className="mt-1 divide-y divide-line border border-line">
+              <ul className="mt-1 divide-y divide-rule border border-rule">
                 {scheme.points.map((point, i) => {
                   const on = schemeTicks.includes(i);
                   return (
@@ -367,7 +367,7 @@ function QuestionBody(props: QuestionViewProps) {
                 <summary className="cursor-pointer text-[13px] text-ink-2">
                   Levels of response ({levels.length} bands)
                 </summary>
-                <ul className="mt-2 divide-y divide-line">
+                <ul className="mt-2 divide-y divide-rule">
                   {levels.map((l) => (
                     <li key={l.level} className="py-2">
                       <span className="text-[13px]">
@@ -574,7 +574,7 @@ function Verdict({
             ) : null}
             {chapter.knowledge.examTip ? (
               <p className="prose-note">
-                <span className="text-ink-1">In the exam:</span> {chapter.knowledge.examTip}
+                <span className="text-ink-2">In the exam:</span> {chapter.knowledge.examTip}
               </p>
             ) : null}
           </div>

@@ -22,10 +22,16 @@ export function SectionHead({
   return (
     <div className="flex flex-wrap items-end justify-between gap-3 border-b border-rule pb-2.5">
       <div className="min-w-0">
-        <div className="label flex items-center gap-2">
-          {index ? <span className="num text-ink-3">{index}</span> : null}
+        {/*
+          The title is a heading, not an eyebrow label. Sharing the 10.5px
+          uppercase .label token with stat metadata left sections with no
+          visual weight, so the index stays small and the title becomes a real
+          h2.
+        */}
+        <h2 className="flex items-baseline gap-2 text-[13px] font-semibold tracking-tight text-ink">
+          {index ? <span className="label num text-ink-3">{index}</span> : null}
           <span>{title}</span>
-        </div>
+        </h2>
         {hint ? <p className="prose-note mt-1 text-[13px]">{hint}</p> : null}
       </div>
       {action}

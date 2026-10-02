@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { IBM_Plex_Sans, IBM_Plex_Mono, Newsreader } from "next/font/google";
 import { AppProviders } from "@/components/shell";
 import { ServiceWorkerRegistration } from "@/components/service-worker-registration";
+import { THEME_BOOTSTRAP } from "@/lib/theme";
 import "katex/dist/katex.min.css";
 import "./globals.css";
 
@@ -51,9 +52,20 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html
       lang="en"
+      data-theme="light"
       className={`${plexSans.variable} ${plexMono.variable} ${newsreader.variable} h-full`}
       suppressHydrationWarning
     >
+      <head>
+        {/*
+          Resolves the stored theme during HTML parsing, before the first paint.
+          Without this the page renders light and then flips to dark once React
+          hydrates, which is a visible white flash for anyone on a dark-mode
+          device. `data-theme="light"` above is only the server's default for the
+          prerendered HTML; this script overwrites it.
+        */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP }} />
+      </head>
       <body className="flex min-h-full flex-col">
         <AppProviders>{children}</AppProviders>
         <ServiceWorkerRegistration />

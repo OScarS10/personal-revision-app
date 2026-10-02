@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readdirSync, readFileSync as fs } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, readdirSync, readFileSync as fs } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { generateQuestion, generatorsFor } from "@/lib/generators/registry";
 import "@/lib/generators/all";
 import { markQuestion } from "@/lib/marking";
@@ -24,8 +25,37 @@ import { SUBJECT_ORDER, getChapters, getChapter } from "@/lib/specs";
 const TARGETS = [-2, -1, 0, 1, 2];
 const SEEDS_PER_TARGET = 6;
 
-const TESTS_DIR = import.meta.dirname ?? process.cwd();
-const ROOT = resolve(TESTS_DIR, "..");
+/*
+  Locate the project root by walking up from this file until package.json
+  appears.
+
+  The previous version assumed the tests directory was always exactly one level
+  below the root, via `import.meta.dirname ?? process.cwd()` followed by
+  resolve(..). That assumption is what breaks the tests when the project is
+  unzipped or nested elsewhere: `import.meta.dirname` is undefined under the CJS
+  transform, so it fell back to process.cwd(), and resolve(cwd, "..") then
+  pointed one folder ABOVE the project. The tests still ran, but every
+  readSource() call silently failed against the wrong directory.
+
+  Anchoring on package.json means the tests do not care where the project sits on
+  disk or how deep the tests folder is.
+*/
+export function findProjectRoot(): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  let dir = here;
+  for (let i = 0; i < 10; i++) {
+    if (existsSync(resolve(dir, "package.json"))) return dir;
+    const parent = resolve(dir, "..");
+    // Stop if we hit the filesystem root rather than looping forever.
+    if (parent === dir) break;
+    dir = parent;
+  }
+  throw new Error(
+    `could not locate package.json above ${here}; the tests must run inside the project`,
+  );
+}
+
+const ROOT = findProjectRoot();
 
 /** Read a source file relative to the project root. */
 const readSource = (rel: string) => fs(resolve(ROOT, rel), "utf8");
@@ -424,9 +454,12 @@ describe("generators are registered on the client", () => {
     }
 
     // Any generator module that exists has to be reachable from the barrel.
-    const modules = readdirSync("src/lib/generators")
+    // Anchored on ROOT rather than process.cwd() for the same reason as above:
+    // an empty directory listing would make this loop pass vacuously.
+    const modules = readdirSync(resolve(ROOT, "src/lib/generators"))
       .filter((f) => f.startsWith("aqa-") || f.startsWith("edexcel-") || f.startsWith("ocr-"))
       .map((f) => f.replace(/\.ts$/, ""));
+    assert.ok(modules.length > 0, "found no generator modules to check");
     for (const name of modules) {
       assert.ok(
         barrel.includes(`@/lib/generators/${name}"`),

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useMemo, useState, type ReactNode } from "react";
 import { StoreProvider, useStore } from "@/components/store-provider";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { SUBJECTS, SUBJECT_ORDER } from "@/lib/specs";
 import { buildReviewQueue, summariseReview } from "@/lib/spaced";
 import type { SubjectId } from "@/lib/types";
@@ -34,14 +35,23 @@ function SubjectBar() {
     <div className="border-rule bg-surface sticky top-0 z-30 border-b">
       <div className="page-wide">
         <div className="flex h-14 items-center justify-between gap-4">
-          <Link href="/" className="flex shrink-0 items-baseline gap-2">
+          {/*
+            -my-1 cancels the padding back out so the 44px row is unchanged,
+            but the link becomes a 26px-tall target instead of an 18px one.
+          */}
+          <Link href="/" className="-my-1 flex shrink-0 items-baseline gap-2 py-1">
             <span className="font-display text-ink text-[1.15rem] leading-none font-semibold tracking-tight">
               Specwise
             </span>
-            <span className="label hidden sm:inline">Revision</span>
+            <span className="label hidden lg:inline">Revision</span>
           </Link>
 
-          <nav className="hidden items-center gap-0.5 md:flex" aria-label="Main">
+          {/*
+            Eight links plus the brand and theme toggle need ~1010px. Below lg
+            they do not fit, so the menu button covers that band instead of the
+            header overflowing sideways.
+          */}
+          <nav className="hidden items-center gap-0.5 lg:flex" aria-label="Main">
             {NAV.map((item) => {
               const active = pathname === item.href;
               return (
@@ -69,16 +79,28 @@ function SubjectBar() {
                 Pick chapters
               </Link>
             ) : (
-              <span className="label num hidden sm:inline">
+              <span className="label num hidden xl:inline">
                 {totalEnabled} chapter{totalEnabled === 1 ? "" : "s"}
               </span>
             )}
+
+            {/*
+              The segmented control is far wider than the icon and only fits once
+              the nav has the full row to itself. Promoting it at lg is what made
+              the 768-1180px band scroll sideways.
+            */}
+            <span className="hidden xl:inline-flex">
+              <ThemeToggle />
+            </span>
+            <span className="inline-flex xl:hidden">
+              <ThemeToggle compact />
+            </span>
 
             <button
               onClick={() => setOpen((v) => !v)}
               aria-expanded={open}
               aria-label="Open menu"
-              className="btn btn-sm btn-ghost md:hidden"
+              className="btn btn-sm btn-ghost lg:hidden"
             >
               Menu
             </button>
@@ -87,7 +109,7 @@ function SubjectBar() {
       </div>
 
       {open ? (
-        <div className="border-rule bg-surface animate-in border-t md:hidden">
+        <div className="border-rule bg-surface animate-in border-t lg:hidden">
           <nav className="page-wide flex flex-col py-1" aria-label="Main (mobile)">
             {NAV.map((item) => (
               <Link

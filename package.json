@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build && tsx scripts/stamp-service-worker.ts",
     "start": "tsx scripts/serve-static.ts",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
@@ -15,6 +15,7 @@
     "test": "tsx --test tests/*.test.ts",
     "report:selector": "tsx scripts/report-selector.ts",
     "check:browser": "tsx scripts/check-browser.ts",
+    "check:layout": "tsx scripts/audit-layout.ts",
     "preview": "npm run build && tsx scripts/serve-static.ts"
   },
   "dependencies": {

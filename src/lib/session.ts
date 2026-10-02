@@ -7,6 +7,11 @@ import type {
   TemplateStat,
 } from "@/lib/types";
 import { clamp } from "@/lib/math-utils";
+import {
+  applyDifficultyPreference,
+  DEFAULT_DIFFICULTY,
+  type DifficultyPreference,
+} from "@/lib/difficulty";
 import { generateQuestion, generatorsFor } from "@/lib/generators/registry";
 import { confidenceOf, getSkillState } from "@/lib/model";
 
@@ -177,10 +182,10 @@ export function nextDifficulty(
   recent: Answer[],
   stretch: number,
   rng: () => number = Math.random,
+  preference: DifficultyPreference = DEFAULT_DIFFICULTY,
 ): number {
   const base = clamp(ability + stretch, -3, 3.5);
-
-  if (recent.length === 0) return base;
+  if (recent.length === 0) return applyDifficultyPreference(base, preference);
 
   // Weight the last three attempts, most recent heaviest.
   const window = recent.slice(-3);
@@ -199,7 +204,18 @@ export function nextDifficulty(
   // Small amount of noise so two identical runs do not look identical.
   const noise = (rng() - 0.5) * 0.16;
 
-  return clamp(base + adjustment + noise, -3, 3.5);
+  /*
+    The learner's chosen difficulty is applied last, to the whole adaptive
+    result, so the two compose rather than fight. The model still decides where
+    to sit relative to current ability and the preference shifts that target up
+    or down.
+
+    Applying it to the finished target rather than to `base` alone is
+    deliberate. A learner on a run of wrong answers who selects "gentle" is
+    asking to back off; shifting only the base would leave the adaptive
+    correction pulling them straight back up to the same hard question.
+  */
+  return clamp(applyDifficultyPreference(base + adjustment + noise, preference), -3, 3.5);
 }
 
 /**

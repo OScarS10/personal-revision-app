@@ -149,7 +149,7 @@ export function DashboardPage() {
               </Link>
             }
           />
-          <div className="panel divide-y divide-line">
+          <div className="panel divide-y divide-rule">
             {weakest.map((insight) => {
               const spark = accuracySparkline(state.answers, insight.chapterId, 24);
               return (

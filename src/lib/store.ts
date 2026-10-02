@@ -7,6 +7,7 @@ import type {
   TemplateStat,
 } from "@/lib/types";
 import { DEFAULT_MODEL_CONFIG } from "@/lib/types";
+import { sanitiseDifficulty } from "@/lib/difficulty";
 import { createSkillState } from "@/lib/model";
 import { SUBJECT_ORDER, defaultEnabled } from "@/lib/specs";
 
@@ -214,6 +215,7 @@ export function migrateState(raw: unknown, now = Date.now()): PersistedState {
     propagation: Math.max(0, Math.min(0.9, num(rawConfig.propagation, DEFAULT_MODEL_CONFIG.propagation))),
     exploration: Math.max(0, Math.min(1, num(rawConfig.exploration, DEFAULT_MODEL_CONFIG.exploration))),
     stretch: num(rawConfig.stretch, DEFAULT_MODEL_CONFIG.stretch),
+    difficulty: sanitiseDifficulty(rawConfig.difficulty),
     selfAssessedWeight: Math.max(
       0,
       Math.min(1, num(rawConfig.selfAssessedWeight, DEFAULT_MODEL_CONFIG.selfAssessedWeight)),

@@ -186,7 +186,7 @@ export function StatsPage() {
             </Badge>
           ))}
         </div>
-        <div className="panel divide-y divide-line">
+        <div className="panel divide-y divide-rule">
           {[...subjectInsights]
             .sort((a, b) => b.weakness - a.weakness)
             .map((i) => (

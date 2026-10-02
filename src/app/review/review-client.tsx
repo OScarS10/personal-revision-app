@@ -148,7 +148,7 @@ export function ReviewPage() {
               </div>
             }
           />
-          <div className="panel mb-6 divide-y divide-line">
+          <div className="panel mb-6 divide-y divide-rule">
             {ready.slice(0, limit).map((row) => (
               <ReviewLine key={row.chapterId} row={row} />
             ))}
@@ -172,7 +172,7 @@ export function ReviewPage() {
       {later.length > 0 ? (
         <>
           <SectionHead title="Coming up" />
-          <div className="panel divide-y divide-line">
+          <div className="panel divide-y divide-rule">
             {later.map((row) => (
               <ReviewLine key={row.chapterId} row={row} />
             ))}

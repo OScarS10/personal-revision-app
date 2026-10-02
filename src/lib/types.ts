@@ -1,3 +1,5 @@
+import type { DifficultyPreference } from "./difficulty";
+
 export type SubjectId = "aqa-economics" | "ocr-computer-science" | "edexcel-mathematics";
 
 export type PaperId = string;
@@ -278,6 +280,13 @@ export interface ModelConfig {
   /** Target difficulty offset above current ability (logits). */
   stretch: number;
   /**
+   * Learner-chosen difficulty. An offset applied to the target before
+   * selection, so a learner can ask for a gentler start or to be pushed harder
+   * than their current ability. Defaults to "standard", which is a no-op.
+   * See src/lib/difficulty.ts.
+   */
+  difficulty: DifficultyPreference;
+  /**
    * Weight given to a self-assessed extended answer relative to a machine-marked
    * one. Marking your own work against a scheme runs generous, so a self-score of
    * full marks is weaker evidence than a verified one. Kept in the config rather
@@ -299,6 +308,7 @@ export const DEFAULT_MODEL_CONFIG: ModelConfig = {
   propagation: 0.35,
   exploration: 0.12,
   stretch: 0.35,
+  difficulty: "standard",
   selfAssessedWeight: 0.45,
   bkt: {
     pInitialLearned: 0.12,

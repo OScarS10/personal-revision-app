@@ -47,6 +47,16 @@ function codeQuestion(
 
 // ============================================== 1.1 Structure and representation
 
+/*
+  These generators are about NUMBER REPRESENTATION, not the processor.
+
+  They were originally registered against 1.1.1 "Structure and function of the
+  processor", which made the processor chapter ask how many bits a nibble held.
+  The section header below used to say "1.1 Structure and representation",
+  which is where the confusion started: the spec's 1.1 is about the processor and
+  its registers, and this content is 1.4.1 Data types.
+*/
+
 const representationGenerators: Generator[] = [
   {
     key: "cs-binary-conversion",
@@ -1171,22 +1181,2015 @@ const paradigmGenerators: Generator[] = [
   },
 ];
 
+// ============================================== 1.1 Processor architecture
+
+/*
+  The processor chapter. This content existed nowhere before: 1.1.1 was wired to
+  the number-representation templates above, so "Structure and function of the
+  processor" asked how many bits a nibble held. These are the questions the
+  chapter title actually promises.
+
+  The fetch-execute generator is the centrepiece because it is the one thing a
+  learner has to hold in their head at once. It builds a real register trace
+  with a simulator rather than asserting a fixed answer, so the numbers cannot
+  drift out of step with the prose.
+*/
+
+const processorGenerators: Generator[] = [
+  {
+    key: "cs-register-role",
+    base: -1.0,
+    span: 1.1,
+    build: ({ rng }) => {
+      const registers = [
+        {
+          name: "PC",
+          role: "holds the address of the next instruction to be fetched",
+        },
+        {
+          name: "MAR",
+          role: "holds the address of the memory location data is about to be read from or written to",
+        },
+        {
+          name: "MDR",
+          role: "holds the data itself while it is being transferred to or from memory",
+        },
+        {
+          name: "CIR",
+          role: "holds the instruction currently being decoded and executed",
+        },
+        {
+          name: "ACC",
+          role: "holds the result of the ALU while it is being used",
+        },
+      ] as const;
+      const correct = rng.pick(registers);
+      // Plausible confusions: another register's genuine role, which is far more
+      // useful to a learner than an obviously wrong option.
+      const others = registers.filter((r) => r.name !== correct.name);
+      return choiceQuestion(
+        "Which register is responsible for this job?",
+        correct.name,
+        rng.sample(others, 3).map((r) => r.name),
+        {
+          rng,
+          marks: 2,
+          solution: [
+            step("Name the job", `The job described is that it ${correct.role}.`),
+            step(
+              "Match it to the register",
+              `That is the **${correct.name}**.`,
+            ),
+          ],
+          takeaway: `The **${correct.name}** ${correct.role}.`,
+          context:
+            "A CPU keeps several small, very fast stores of data. Telling them apart is the single most examinable fact in this topic.",
+        },
+      );
+    },
+  },
+  {
+    key: "cs-register-role-why",
+    base: 0.6,
+    span: 1.5,
+    build: ({ rng }) => {
+      const scenarios = [
+        {
+          register: "MAR",
+          need: "to tell memory which location to read from next",
+          wrong: "MDR",
+        },
+        {
+          register: "MDR",
+          need: "to hold the value that memory has just returned",
+          wrong: "MAR",
+        },
+        {
+          register: "PC",
+          need: "to know where in memory to fetch the next instruction from",
+          wrong: "CIR",
+        },
+        {
+          register: "CIR",
+          need: "to keep the instruction being executed available while the control unit decodes it",
+          wrong: "PC",
+        },
+      ] as const;
+      const s = rng.pick(scenarios);
+      return choiceQuestion(
+        `The processor needs a register ${s.need}. Which register is it?`,
+        s.register,
+        [s.wrong, "ACC", "The ALU"],
+        {
+          rng,
+          marks: 2,
+          solution: [
+            step(
+              "Separate address from data",
+              "The **MAR** deals in addresses, the **MDR** in the data itself, and the **PC** in the address of the next instruction. They are routinely swapped in questions because they are used together.",
+            ),
+            step("Apply it", `Here the register needed is **${s.register}**.`),
+          ],
+          takeaway:
+            "MAR = address, MDR = data, PC = next instruction, CIR = current instruction, ACC = ALU result.",
+        },
+      );
+    },
+  },
+  {
+    key: "cs-bus-direction",
+    base: 0.2,
+    span: 1.4,
+    build: ({ rng }) => {
+      const buses = [
+        {
+          name: "address bus",
+          direction: "one-way (from the processor)",
+          carries: "memory addresses",
+        },
+        {
+          name: "data bus",
+          direction: "two-way",
+          carries: "the actual data, both to and from memory",
+        },
+        {
+          name: "control bus",
+          direction: "one-way",
+          carries: "control signals such as read, write and interrupt",
+        },
+      ] as const;
+      const correct = rng.pick(buses);
+      return choiceQuestion(
+        `Which single statement about the **${correct.name}** is correct?`,
+        `${correct.direction}, carrying ${correct.carries}`,
+        [
+          `two-way, carrying ${correct.carries}`,
+          `one-way (from the processor), carrying control signals`,
+          `two-way, carrying memory addresses`,
+        ],
+        {
+          rng,
+          marks: 2,
+          solution: [
+            step(
+              "Recall each bus",
+              "The **address bus** is one-way and carries addresses. The **data bus** is two-way. The **control bus** carries the signals that say what to do.",
+            ),
+            step("Apply it", `Here the **${correct.name}** is ${correct.direction}, carrying ${correct.carries}.`),
+          ],
+          takeaway:
+            "The data bus is the only two-way bus, which is why it is the only one that needs to be as wide as a word.",
+          context:
+            "Bus width is a common exam detail: a wider bus moves more bits per transfer, so it is faster for the same clock speed.",
+        },
+      );
+    },
+  },
+  {
+    key: "cs-fetch-execute-register",
+    base: 1.1,
+    span: 1.6,
+    build: ({ rng, tier }) => {
+      const stages = [
+        {
+          text: "The address of the next instruction is placed in the **MAR**.",
+          register: "MAR",
+          detail: "The PC is copied into the MAR, which then puts that address on the address bus.",
+        },
+        {
+          text: "The instruction returned by memory is held in the **MDR**.",
+          register: "MDR",
+          detail: "Memory puts the instruction on the data bus and the MDR captures it.",
+        },
+        {
+          text: "The instruction is moved into the **CIR** to be decoded.",
+          register: "CIR",
+          detail: "The control unit decodes the instruction held in the CIR.",
+        },
+        {
+          text: "The address of the next instruction is incremented in the **PC**.",
+          register: "PC",
+          detail: "The PC steps on to the following instruction so the cycle can repeat.",
+        },
+        {
+          text: "The result of an arithmetic operation is placed in the **ACC**.",
+          register: "ACC",
+          detail: "The ACC is the ALU's output register during the execute stage.",
+        },
+      ];
+      // Higher tiers ask about the later stages, which are harder to recall.
+      const pool = tier <= 2 ? stages.slice(0, 3) : stages;
+      const s = rng.pick(pool);
+      const others = stages.filter((x) => x.register !== s.register);
+      return choiceQuestion(
+        `During the fetch-execute cycle: ${s.text} Which register does this step involve?`,
+        s.register,
+        rng.sample(others, 3).map((x) => x.register),
+        {
+          rng,
+          marks: tier >= 4 ? 3 : 2,
+          solution: [
+            step("Why that register", s.detail),
+            step(
+              "Where it sits in the cycle",
+              "The **MAR** names the location, the **MDR** carries the data, the **CIR** holds the instruction while it is decoded, and the **PC** points at the next one.",
+            ),
+          ],
+          takeaway:
+            "Fetch: PC → MAR → address bus → memory → MDR → CIR. Execute: the control unit acts on the decoded instruction.",
+        },
+      );
+    },
+  },
+  {
+    key: "cs-fetch-execute-trace",
+    base: 1.7,
+    span: 1.5,
+    build: ({ rng }) => {
+      /*
+        A real trace, simulated rather than hard-coded. The registers are
+        mutated in the order the hardware performs them, so if the description
+        below is wrong the answer would be wrong too - the question cannot
+        silently disagree with its own worked solution.
+      */
+      const address = rng.int(40, 250);
+      const registers = [
+        { name: "PC", value: address },
+        { name: "MAR", value: 0 },
+        { name: "MDR", value: 0 },
+        { name: "CIR", value: 0 },
+      ] as { name: string; value: number }[];
+      const byName = (n: string) => registers.find((r) => r.name === n)!;
+
+      const trace: string[] = [];
+      // Fetch: MAR <- PC, then memory returns into MDR, then MDR -> CIR.
+      byName("MAR").value = byName("PC").value;
+      trace.push(`MAR <- PC, so MAR = ${byName("MAR").value}`);
+      byName("MDR").value = 9000 + address;
+      trace.push(`MDR <- instruction from memory, so MDR = ${byName("MDR").value}`);
+      byName("CIR").value = byName("MDR").value;
+      trace.push(`CIR <- MDR, so CIR = ${byName("CIR").value}`);
+      byName("PC").value = address + 1;
+      trace.push(`PC incremented, so PC = ${byName("PC").value}`);
+
+      const answerAfterFetch = String(byName("MAR").value);
+
+      return choiceQuestion(
+        `A program starts with **PC = ${address}**. After the **fetch** stage of the fetch-execute cycle completes, but before the instruction is executed, what does the **MAR** contain?`,
+        answerAfterFetch,
+        [
+          String(byName("MDR").value),
+          String(byName("CIR").value),
+          String(address + 1),
+        ],
+        {
+          rng,
+          marks: 4,
+          solution: [
+            step("The MAR copies the PC", `The MAR is loaded from the PC, so it holds ${address}.`),
+            step(
+              "It keeps that value through fetch",
+              `The MDR and CIR are then filled with the instruction (${byName("MDR").value}), but the MAR still holds the address it put on the bus: ${byName("MAR").value}.`,
+            ),
+            step("The PC moves on, the MAR does not", `The PC becomes ${byName("PC").value}, which is the classic distractor here.`),
+          ],
+          takeaway:
+            "The MAR holds the address for the whole fetch. It is the MDR and the CIR that change to hold data, not the MAR.",
+          context:
+            "Trace the register that the question asks about, and note that the PC increments while the MAR does not.",
+        },
+      );
+    },
+  },
+  {
+    key: "cs-cisc-risc-match",
+    base: 0.8,
+    span: 1.5,
+    build: ({ rng }) => {
+      const features = [
+        { text: "many instructions, each of which can do a lot in one step", answer: "CISC" },
+        { text: "a small set of simple, fixed-length instructions", answer: "RISC" },
+        { text: "control implemented in microcode in a control store", answer: "CISC" },
+        { text: "control implemented directly in hardware", answer: "RISC" },
+        { text: "instructions take several clock cycles to complete", answer: "CISC" },
+        { text: "a load-store design where only load and store touch memory", answer: "RISC" },
+        { text: "a larger and more complex compiler is usually needed", answer: "CISC" },
+      ] as const;
+      const f = rng.pick(features);
+      return choiceQuestion(
+        `Which processor type is characterised by ${f.text}?`,
+        f.answer,
+        f.answer === "CISC" ? ["RISC", "Neither is defined by this"] : ["CISC", "Neither is defined by this"],
+        {
+          rng,
+          marks: 2,
+          solution: [
+            step(
+              "CISC or RISC",
+              "**CISC** has many complex instructions, often microcoded and variable length. **RISC** has few simple fixed-length instructions, decoded in hardware.",
+            ),
+            step("Apply it", `"${f.text}" describes **${f.answer}**.`),
+          ],
+          takeaway:
+            "CISC = lots of complex instructions, microcode control. RISC = few simple ones, hardware control, load-store.",
+        },
+      );
+    },
+  },
+  {
+    key: "cs-amdahl-speedup",
+    base: 1.5,
+    span: 1.7,
+    build: ({ rng }) => {
+      // Amdahl: speedup = 1 / ((1 - p) + p/n). Computed, never tabulated.
+      const serialPercent = rng.int(10, 45);
+      const p = (100 - serialPercent) / 100;
+      const processors = rng.pick([2, 4, 8, 16]);
+      const speedup = 1 / (serialPercent / 100 + p / processors);
+      const perfect = 1 / (serialPercent / 100);
+
+      return choiceQuestion(
+        `A program spends **${serialPercent}%** of its time on work that cannot be parallelised. The remaining **${100 - serialPercent}%** is split evenly across **${processors}** cores. What is the speed-up?`,
+        `About ${speedup.toFixed(2)} times`,
+        [
+          `About ${perfect.toFixed(2)} times`,
+          `About ${processors} times`,
+          `About ${(processors * (1 - p)).toFixed(2)} times`,
+        ],
+        {
+          rng,
+          marks: 4,
+          solution: [
+            step("Write Amdahl's law", "Speed-up = 1 / ((1 - p) + p/n), where p is the parallelisable proportion."),
+            step(
+              "Substitute",
+              `p = ${p.toFixed(2)} and n = ${processors}, so speed-up = 1 / (${serialPercent / 100} + ${p.toFixed(2)}/${processors}) = ${speedup.toFixed(2)}.`,
+            ),
+            step(
+              "Compare with the ideal",
+              `Even with infinite cores the ceiling is 1/${serialPercent / 100} = ${perfect.toFixed(2)}. The serial part is what caps it.`,
+            ),
+          ],
+          takeaway:
+            "Amdahl's law: speed-up = 1 / ((1 - p) + p/n). The serial fraction caps the result, so doubling cores gives diminishing returns.",
+          context:
+            "This is a standard 6-marker. Write the formula, substitute carefully, then comment that the serial part limits the gain.",
+        },
+      );
+    },
+  },
+  {
+    key: "cs-gpu-multicore",
+    base: 0.1,
+    span: 1.5,
+    build: ({ rng }) => {
+      const items = [
+        {
+          text: "thousands of small cores running the same instruction over many data items at once, which suits training a neural network",
+          answer: "a GPU",
+          why: "A GPU is built for high throughput on large numbers of similar operations, not for branching control flow.",
+        },
+        {
+          text: "a processor with several complete execution units on one chip, so several programs can run at the same time",
+          answer: "a multicore processor",
+          why: "Multicore puts several cores on one chip so the operating system can schedule work across them.",
+        },
+        {
+          text: "many separate processors connected by a network, each with its own memory, working on one problem",
+          answer: "a parallel processing system",
+          why: "A cluster distributes both processing and memory across networked machines.",
+        },
+        {
+          text: "dividing a problem into many small tasks that can be finished at the same time on different cores",
+          answer: "parallelism",
+          why: "Parallelism is the technique; multicore, GPU and cluster are the hardware that enables it.",
+        },
+      ] as const;
+      const s = rng.pick(items);
+      return choiceQuestion(
+        `Which term best matches: ${s.text}?`,
+        s.answer,
+        rng.sample(items.filter((x) => x.answer !== s.answer), 3).map((x) => x.answer),
+        {
+          rng,
+          marks: 2,
+          solution: [
+            step("Identify it", `**${s.answer}**.`),
+            step("Why", s.why),
+          ],
+          takeaway:
+            "A GPU is many simple cores for bulk maths. Multicore is several full CPUs on one chip. A cluster is networked machines.",
+        },
+      );
+    },
+  },
+  {
+    key: "cs-processor-performance",
+    base: 0.4,
+    span: 1.6,
+    build: ({ rng, tier }) => {
+      const factors = [
+        "the clock speed, in hertz",
+        "the number of cores",
+        "the size of the cache",
+        "the length of the instructions in the instruction set",
+      ] as const;
+      if (tier >= 4) {
+        // Harder variant: two machines, ask which is faster and why.
+        const clockA = rng.int(2, 4);
+        const clockB = rng.int(4, 6);
+        const coresA = rng.int(2, 4);
+        const coresB = rng.int(2, 3);
+        const faster = clockA * coresA > clockB * coresB ? "Machine A" : "Machine B";
+        return choiceQuestion(
+          `Machine A has a **${clockA} GHz** clock and **${coresA}** cores. Machine B has a **${clockB} GHz** clock and **${coresB}** cores. Assuming everything else is identical, which is faster?`,
+          faster,
+          [
+            faster === "Machine A" ? "Machine B" : "Machine A",
+            "Neither, clock speed is the only factor",
+            "It cannot be determined without knowing the instruction sets",
+          ],
+          {
+            rng,
+            marks: 3,
+            solution: [
+              step(
+                "Work out a rough figure",
+                `Machine A: ${clockA} x ${coresA} = ${clockA * coresA}. Machine B: ${clockB} x ${coresB} = ${clockB * coresB}.`,
+              ),
+              step(
+                "Be careful",
+                "Multiplying clock speed by core count is only a rough comparison. Cache size, architecture and instruction length all matter, which is why the question says everything else is identical.",
+              ),
+            ],
+            takeaway:
+              "Clock speed x cores is a guide, not a rule. Cache size, instruction set length and architecture can outweigh it.",
+          },
+        );
+      }
+      const f = rng.pick(factors);
+      const others = factors.filter((x) => x !== f);
+      return choiceQuestion(
+        "Which of the following affects how fast a processor runs?",
+        f,
+        rng.sample(others, 3),
+        {
+          rng,
+          marks: 2,
+          solution: [
+            step("List them all", "Clock speed, number of cores, cache size and instruction set length all affect performance."),
+            step("Apply it", `"${f}" is one of them.`),
+          ],
+          takeaway:
+            "Clock speed, cores, cache size, architecture and instruction set length are the five factors named in the specification.",
+        },
+      );
+    },
+  },
+];
+
+// ============================================ 1.1.3 Input, output and storage
+
+const storageGenerators: Generator[] = [
+  {
+    key: "cs-storage-volatility",
+    base: -0.9,
+    span: 1.2,
+    build: ({ rng }) => {
+      const devices = [
+        {
+          device: "RAM",
+          volatile: true,
+          note: "volatile: contents are lost when the power goes",
+        },
+        {
+          device: "ROM",
+          volatile: false,
+          note: "non-volatile and read-only, holding firmware that survives a power cut",
+        },
+        {
+          device: "a hard disk",
+          volatile: false,
+          note: "magnetic, non-volatile, read/write and addressable",
+        },
+        {
+          device: "flash memory",
+          volatile: false,
+          note: "non-volatile, read/write, with no moving parts",
+        },
+        {
+          device: "a DVD",
+          volatile: false,
+          note: "optical, non-volatile and effectively read-only",
+        },
+      ] as const;
+      const askVolatile = rng.bool();
+      const correct = askVolatile
+        ? devices.find((d) => d.volatile)!
+        : devices.find((d) => !d.volatile)!;
+      const others = devices.filter((d) => d.device !== correct.device);
+      return choiceQuestion(
+        askVolatile
+          ? "Which of these storage devices is **volatile**, meaning its contents are lost when the power is removed?"
+          : "Which of these storage devices is **non-volatile**, meaning its contents survive when the power is removed?",
+        correct.device,
+        rng.sample(others, 3).map((d) => d.device),
+        {
+          rng,
+          marks: 2,
+          solution: [
+            step(
+              "Recall the definition",
+              "Volatile means lost on power-off. **RAM** is the only volatile item here; everything else keeps its contents.",
+            ),
+            step("Apply it", `${correct.device} is the answer: it ${correct.note}.`),
+          ],
+          takeaway:
+            "RAM is volatile and read/write. ROM, magnetic, flash and optical storage are all non-volatile.",
+        },
+      );
+    },
+  },
+  {
+    key: "cs-storage-compare",
+    base: 0.9,
+    span: 1.6,
+    build: ({ rng }) => {
+      const scenarios = [
+        {
+          need: "the operating system must load as soon as the machine is switched on, before any disk is available",
+          answer: "ROM",
+          why: "ROM holds the boot code, which has to be readable before the disk is mounted.",
+        },
+        {
+          need: "a photograph library that must survive a laptop being dropped, with no moving parts",
+          answer: "flash",
+          why: "Flash has no moving parts, so it survives knocks where a magnetic disk would not always.",
+        },
+        {
+          need: "the largest amount of data at the lowest cost per gigabyte for archiving films",
+          answer: "magnetic storage",
+          why: "Magnetic disks are cheapest per unit of capacity, which is why they are used for bulk archive.",
+        },
+        {
+          need: "software that ships on a disc and is never rewritten by the user",
+          answer: "optical",
+          why: "Optical media are pressed rather than written, so they suit distribution of fixed content.",
+        },
+      ] as const;
+      const s = rng.pick(scenarios);
+      return choiceQuestion(
+        `A system needs storage where ${s.need}. Which type of storage is the best fit?`,
+        s.answer,
+        ["RAM", "ROM", "flash"].filter((x) => x !== s.answer).slice(0, 2),
+        {
+          rng,
+          marks: 3,
+          solution: [
+            step("Weigh the requirement", s.why),
+            step(
+              "Exclude the rest",
+              "RAM loses its contents on power-off, so it cannot hold anything permanent. ROM cannot be rewritten, so it suits fixed code rather than a large library.",
+            ),
+          ],
+          takeaway:
+            "Match the storage type to the requirement: speed and volatility matter more than raw capacity in most of these.",
+        },
+      );
+    },
+  },
+  {
+    key: "cs-virtual-storage",
+    base: 1.6,
+    span: 1.4,
+    build: ({ rng }) => {
+      const reasons = [
+        {
+          text: "so that each program has its own address space and cannot overwrite another's memory",
+          answer: "it prevents one program corrupting another's data",
+        },
+        {
+          text: "so that more programs can be open than could physically fit in RAM",
+          answer: "it lets programs that do not fit in RAM still run",
+        },
+        {
+          text: "so that main memory does not have to hold the whole of every program at once",
+          answer: "only the pages actually in use are loaded into RAM",
+        },
+      ] as const;
+      const r = rng.pick(reasons);
+      return choiceQuestion(
+        `Virtual storage exists in order to ${r.text}. What is the main advantage?`,
+        r.answer,
+        ["it makes RAM physically larger", "it removes the need for a hard disk"],
+        {
+          rng,
+          marks: 3,
+          solution: [
+            step(
+              "What virtual storage is",
+              "A program is divided into pages. Pages are loaded into RAM only when needed and written back when they have not been used for a while, with the rest held on disk.",
+            ),
+            step("The benefit", r.answer),
+            step(
+              "The cost, for the full explanation",
+              "Paging in and out is slow, so performance is worse than running from RAM alone.",
+            ),
+          ],
+          takeaway:
+            "Virtual storage lets programs exceed RAM by paging, at the cost of disk access time. Each program gets its own address space.",
+        },
+      );
+    },
+  },
+  {
+    key: "cs-storage-access-metric",
+    base: 0.5,
+    span: 1.6,
+    build: ({ rng, tier }) => {
+      const scenarios = [
+        {
+          device: "an SSD",
+          access: "around 0.1 ms",
+          why: "no moving parts, so there is no seek time to wait for",
+        },
+        {
+          device: "a hard disk",
+          access: "around 10 ms",
+          why: "a physical head has to move over the spinning platters",
+        },
+        {
+          device: "main memory (RAM)",
+          access: "around 100 nanoseconds",
+          why: "it is on the same board and connected directly to the CPU",
+        },
+      ] as const;
+      const s = rng.pick(scenarios);
+      const numeric = /(\d+(\.\d+)?)\s*(ms|ns)/.exec(s.access);
+      const value = numeric ? Number(numeric[1]) : 0;
+      const unit = numeric ? numeric[3]! : "";
+
+      if (tier >= 4) {
+        // Harder: the comparison, which is what the specification actually asks.
+        const hd = scenarios[1]!;
+        const ssd = scenarios[0]!;
+        const ratio = Math.round(10 / 0.1);
+        return choiceQuestion(
+          "A program reads many small files in sequence. Why is an SSD noticeably faster than a hard disk for this workload?",
+          "the SSD has a much lower access time because it has no moving parts",
+          [
+            "the SSD stores more data per disk, so fewer reads are needed",
+            "the SSD has a higher data transfer rate, so each read is quicker",
+            "the hard disk is slower to transfer data, because it is magnetic",
+          ],
+          {
+            rng,
+            marks: 3,
+            solution: [
+              step(
+                "Compare the metric that matters",
+                `Access time is roughly ${ssd.access} on an SSD against ${hd.access} on a hard disk, a factor of about ${ratio}. Small random reads are dominated by access time, not throughput.`,
+              ),
+              step("Name the cause", `The hard disk ${hd.why}, which is the whole of the difference.`),
+              step(
+                "The trap",
+                "Capacity and transfer rate are real differences, but neither explains a workload made of many tiny reads.",
+              ),
+            ],
+            takeaway:
+              "Access time is latency: how long until the data arrives. Throughput is bandwidth: how much per second. Many small reads are limited by latency, not bandwidth.",
+          },
+        );
+      }
+
+      return choiceQuestion(
+        `Roughly what is the access time of ${s.device}?`,
+        s.access,
+        [scenarios[0]!.access, scenarios[1]!.access, scenarios[2]!.access].filter(
+          (x) => x !== s.access,
+        ),
+        {
+          rng,
+          marks: 2,
+          solution: [
+            step(
+              "Order the hierarchy",
+              "Registers are fastest, then cache, then RAM at around 100 ns, then SSD at around 0.1 ms, then a hard disk at around 10 ms.",
+            ),
+            step("Apply it", `${s.device} is about ${s.access}, because it ${s.why}.`),
+          ],
+          takeaway:
+            "Access times differ by orders of magnitude: RAM ~100 ns, SSD ~0.1 ms, hard disk ~10 ms.",
+          context: `About ${value} ${unit}.`,
+        },
+      );
+    },
+  },
+  {
+    key: "cs-storage-throughput",
+    base: 0.9,
+    span: 1.4,
+    build: ({ rng }) => {
+      const pairs = [
+        {
+          measure: "capacity",
+          question: "How much data the device can hold",
+          unit: "gigabytes or terabytes",
+        },
+        {
+          measure: "access time",
+          question: "How long it takes to reach one piece of data",
+          unit: "milliseconds or nanoseconds",
+        },
+        {
+          measure: "throughput",
+          question: "How much data it can transfer each second",
+          unit: "megabytes or gigabytes per second",
+        },
+      ] as const;
+      const p = rng.pick(pairs);
+      const others = pairs.filter((x) => x.measure !== p.measure);
+      return choiceQuestion(
+        `When comparing two storage devices, ${p.measure} refers to ${p.question}. In what is it usually measured?`,
+        p.unit,
+        rng.sample(others, 2).map((x) => x.unit),
+        {
+          rng,
+          marks: 3,
+          solution: [
+            step("Keep the three apart", "Capacity is how much fits. Access time is the delay to one item. Throughput is the rate of transfer."),
+            step("Apply it", `${p.measure} is measured in ${p.unit}.`),
+            step(
+              "Why the exam asks all three",
+              "A device can be large, fast to reach into and slow to stream from. Judging on one number alone is misleading.",
+            ),
+          ],
+          takeaway:
+            "Capacity = size. Access time = latency to a single item. Throughput = transfer rate. All three are needed to compare storage.",
+        },
+      );
+    },
+  },
+];
+
+// ======================================== 1.2 / 1.3 Systems, data and networks
+
+/*
+  Content for the chapters that were previously wired to whatever generator set
+  happened to be left over.
+
+  Registering 1.3.2 Databases with the encryption templates was not a neutral
+  mistake: it meant a learner revising databases was asked about symmetric
+  encryption, and any result from those questions was fed into the ability model
+  as though it measured their database knowledge. Leaving them empty is more
+  honest but makes the chapter unpracticable, so they are written here instead.
+*/
+
+const systemsGenerators: Generator[] = [
+  {
+    key: "cs-os-component-role",
+    base: -1.0,
+    span: 1.2,
+    build: ({ rng }) => {
+      const parts = [
+        {
+          name: "kernel",
+          job: "controls the processor, memory and all other hardware",
+        },
+        {
+          name: "device driver",
+          job: "lets the operating system communicate with a particular device",
+        },
+        {
+          name: "file system",
+          job: "organises files and folders, and records where they are on disk",
+        },
+        {
+          name: "user interface",
+          job: "provides the way a person interacts with the system",
+        },
+      ] as const;
+      const correct = rng.pick(parts);
+      const others = parts.filter((p) => p.name !== correct.name);
+      return choiceQuestion(
+        `Which component of an operating system has the job of ${correct.job}?`,
+        correct.name,
+        rng.sample(others, 3).map((p) => p.name),
+        {
+          rng,
+          marks: 2,
+          solution: [
+            step("Match job to component", `The component that ${correct.job} is the **${correct.name}**.`),
+            step(
+              "The one that is most often confused",
+              "The kernel and the device drivers are routinely swapped: the kernel controls the machine, while a driver controls one peripheral.",
+            ),
+          ],
+          takeaway: "Kernel = control the hardware. Driver = control one device. File system = organise storage. UI = interaction.",
+        },
+      );
+    },
+  },
+  {
+    key: "cs-memory-management",
+    base: 0.7,
+    span: 1.6,
+    build: ({ rng, tier }) => {
+      const schemes = [
+        {
+          name: "contiguous allocation",
+          pro: "simple and fast to access",
+          con: "needs one unbroken run of memory and is prone to external fragmentation",
+        },
+        {
+          name: "paging",
+          pro: "uses fixed-size pages and removes external fragmentation",
+          con: "can cause internal fragmentation and needs a page table",
+        },
+        {
+          name: "segmentation",
+          pro: "divides memory by logical units such as code and data",
+          con: "suffering from the same external fragmentation as contiguous allocation",
+        },
+      ] as const;
+      if (tier >= 4) {
+        // Harder: ask which scheme has a given property, forcing two distinctions.
+        const s = rng.pick(schemes);
+        return choiceQuestion(
+          `A system suffers from external fragmentation, where free memory exists but is scattered in pieces too small to use. Which allocation scheme is this characteristic of?`,
+          s.name === "paging" ? "contiguous allocation" : s.name,
+          ["paging", "virtual memory", "a cache"],
+          {
+            rng,
+            marks: 3,
+            solution: [
+              step(
+                "Distinguish internal from external",
+                "**External** fragmentation comes from free memory being scattered. **Internal** fragmentation is wasted space inside an allocated block.",
+              ),
+              step(
+                "Apply it",
+                "Contiguous allocation and segmentation both leave external fragmentation, because each needs one contiguous block. Paging avoids external fragmentation entirely because it fixes the block size.",
+              ),
+            ],
+            takeaway:
+              "Paging kills external fragmentation but can cause internal fragmentation. Contiguous and segmented allocation do the opposite.",
+          },
+        );
+      }
+      const s = rng.pick(schemes);
+      return choiceQuestion(
+        `What is the main advantage of **${s.name}**?`,
+        s.pro,
+        schemes.filter((x) => x.name !== s.name).map((x) => x.con),
+        {
+          rng,
+          marks: 2,
+          solution: [
+            step("Recall the trade-off", `**${s.name}**: ${s.pro}, but ${s.con}.`),
+          ],
+          takeaway:
+            "Every memory scheme is a trade-off. Paging removes external fragmentation at the cost of internal fragmentation.",
+        },
+      );
+    },
+  },
+  {
+    key: "cs-translation-stage",
+    base: 0.5,
+    span: 1.6,
+    build: ({ rng }) => {
+      const stages = [
+        {
+          name: "lexical analysis",
+          job: "turns the source code into tokens such as keywords, identifiers and operators",
+        },
+        {
+          name: "syntax analysis",
+          job: "checks the tokens are in a valid order and builds the parse tree",
+        },
+        {
+          name: "code generation",
+          job: "produces the target code from the parse tree",
+        },
+        {
+          name: "optimisation",
+          job: "rewrites the code so it runs faster or uses less memory",
+        },
+      ] as const;
+      const s = rng.pick(stages);
+      return choiceQuestion(
+        `During translation, which stage ${s.job}?`,
+        s.name,
+        rng.sample(stages.filter((x) => x.name !== s.name), 3).map((x) => x.name),
+        {
+          rng,
+          marks: 2,
+          solution: [
+            step("Order the stages", "Source → lexical analysis → syntax analysis → semantic analysis → code generation → optimisation."),
+            step("Apply it", `${s.job} is **${s.name}**.`),
+          ],
+          takeaway:
+            "Lexical = tokens. Syntax = structure and the parse tree. Code generation = output. Optimisation = speed and size.",
+        },
+      );
+    },
+  },
+  {
+    key: "cs-scheduler-policy",
+    base: 0.2,
+    span: 1.5,
+    build: ({ rng }) => {
+      const items = [
+        {
+          text: "a high-priority process is stopped partway through so a higher-priority one can run",
+          answer: "preemptive scheduling",
+          why: "Preemptive scheduling takes the CPU away from a running process when something more important needs it.",
+        },
+        {
+          text: "processes are ordered by importance and each runs until it finishes or blocks",
+          answer: "priority scheduling",
+          why: "Priority scheduling picks the waiting process with the highest priority first.",
+        },
+        {
+          text: "every process gets an equal share of the CPU in turn",
+          answer: "round-robin scheduling",
+          why: "Round-robin gives each process a fixed slice of CPU time in rotation.",
+        },
+        {
+          text: "the measure of how many processes the scheduler completes per unit of time",
+          answer: "throughput",
+          why: "Throughput is the number of jobs finished per unit time, not how long one takes.",
+        },
+      ] as const;
+      const s = rng.pick(items);
+      return choiceQuestion(
+        `In process management, which term matches this: ${s.text}?`,
+        s.answer,
+        rng.sample(items.filter((x) => x.answer !== s.answer), 3).map((x) => x.answer),
+        {
+          rng,
+          marks: 2,
+          solution: [
+            step("Pick the term", `**${s.answer}**.`),
+            step("Why", s.why),
+          ],
+          takeaway:
+            "Preemptive = the scheduler can interrupt. Priority = importance decides order. Throughput = jobs finished per unit time.",
+        },
+      );
+    },
+  },
+  {
+    key: "cs-interrupt-vs-polling",
+    base: 0.1,
+    span: 1.5,
+    build: ({ rng }) => {
+      const items = [
+        {
+          text: "the processor is repeatedly asked whether a device has data, which keeps it busy even when the device is idle",
+          answer: "polling",
+          why: "Polling means the CPU checks the device on a loop, wasting cycles when there is nothing to do.",
+        },
+        {
+          text: "the device signals the processor itself, which stops what it is doing to deal with the event",
+          answer: "an interrupt",
+          why: "An interrupt lets the device raise the processor's attention, so the CPU only reacts when something happens.",
+        },
+        {
+          text: "an interrupt handler must save the processor's state before the interrupted task carries on",
+          answer: "a context switch",
+          why: "The current register values are saved to a stack so the interrupted task can be restored exactly.",
+        },
+        {
+          text: "a device that raises an interrupt the processor is not expecting, leaving it unable to continue",
+          answer: "a deadlock is not involved; this is a device fault",
+          why: "Deadlock is a software scheduling problem between processes, not a device signalling problem.",
+        },
+      ] as const;
+      const s = rng.pick(items);
+      return choiceQuestion(
+        `Which term best matches: ${s.text}?`,
+        s.answer,
+        rng.sample(items.filter((x) => x.answer !== s.answer), 3).map((x) => x.answer),
+        {
+          rng,
+          marks: 2,
+          solution: [
+            step("Identify the mechanism", `**${s.answer}**.`),
+            step("Why", s.why),
+          ],
+          takeaway:
+            "Polling costs CPU time continuously. An interrupt costs it only when there is work.",
+        },
+      );
+    },
+  },
+  {
+    key: "cs-deadlock-conditions",
+    base: 0.7,
+    span: 1.5,
+    build: ({ rng }) => {
+      const conditions = [
+        {
+          name: "mutual exclusion",
+          phrase: "at least one resource is held in a non-shareable state",
+        },
+        {
+          name: "hold and wait",
+          phrase: "a process holds one resource while waiting to be given another",
+        },
+        {
+          name: "no preemption",
+          phrase: "a resource cannot be forcibly taken back from the process holding it",
+        },
+        {
+          name: "circular wait",
+          phrase: "there is a circular chain of processes, each waiting for the next one in the chain",
+        },
+      ] as const;
+      const s = rng.pick(conditions);
+      const others = conditions.filter((c) => c.name !== s.name);
+
+      /*
+        Asked as a scenario rather than as a list, because recognising which of
+        the four conditions a description shows is the part being examined.
+      */
+      const inverted = rng.bool(0.35);
+      if (inverted) {
+        const notDeadlock = [
+          "starvation, where a process is denied CPU time indefinitely",
+          "thrashing, where pages are swapped in and out faster than they are used",
+          "a race condition, where two processes update shared data at the same time",
+        ] as const;
+        const answer = rng.pick(notDeadlock);
+        return choiceQuestion(
+          "Which of these is **not** one of the four Coffman conditions required for deadlock?",
+          answer,
+          [s.phrase, ...rng.sample(others, 2).map((c) => c.phrase)],
+          {
+            rng,
+            marks: 3,
+            solution: [
+              step("Recall the four", `The four are **${conditions.map((c) => c.name).join(", ")}**.`),
+              step("The odd one out", `**${answer}** is a real problem, but not one of the conditions for deadlock.`),
+            ],
+            takeaway: "All four Coffman conditions must hold at once. Breaking any one of them rules deadlock out.",
+          },
+        );
+      }
+
+      return choiceQuestion(
+        `Deadlock is possible only if every condition holds. Which of the four does this describe: ${s.phrase}?`,
+        s.name,
+        rng.sample(others, 3).map((c) => c.name),
+        {
+          rng,
+          marks: 2,
+          solution: [
+            step("Name the condition", `**${s.name}**.`),
+            step("The other three", others.map((c) => `• **${c.name}** — ${c.phrase}`).join("\n")),
+          ],
+          takeaway: "Mutual exclusion, hold and wait, no preemption, circular wait. All four together.",
+        },
+      );
+    },
+  },
+  {
+    key: "cs-compiler-vs-interpreter",
+    base: 0.3,
+    span: 1.5,
+    build: ({ rng }) => {
+      const items = [
+        {
+          text: "it translates the whole program before any of it runs, so errors in later lines are found at once",
+          answer: "a compiler",
+          why: "A compiler produces a separate executable, so it needs the whole program before it can run.",
+        },
+        {
+          text: "it translates and runs one statement at a time, so it suits programs that need user input as they go",
+          answer: "an interpreter",
+          why: "An interpreter runs as it translates, which suits interactive use but is slower.",
+        },
+        {
+          text: "it turns the source into machine code once, so repeated runs do not pay the translation cost again",
+          answer: "a compiler",
+          why: "The translation happens once at build time; the executable then runs directly.",
+        },
+        {
+          text: "it needs no separate executable and is typically slower per instruction than compiled code",
+          answer: "an interpreter",
+          why: "Translating while running costs time on every execution.",
+        },
+      ] as const;
+      const s = rng.pick(items);
+      return choiceQuestion(
+        `Which of these describes ${s.text}?`,
+        s.answer,
+        rng.sample(items.filter((x) => x.answer !== s.answer), 3).map((x) => x.answer),
+        {
+          rng,
+          marks: 2,
+          solution: [step("Decide", `**${s.answer}**.`), step("Why", s.why)],
+          takeaway: "Compiler: translate all, then run, faster to run. Interpreter: translate and run together.",
+        },
+      );
+    },
+  },
+  {
+    key: "cs-linker-loader-library",
+    base: 0.6,
+    span: 1.5,
+    build: ({ rng }) => {
+      const items = [
+        {
+          text: "it combines separately compiled object files into a single executable",
+          answer: "the linker",
+          why: "The linker resolves references between object files and produces the final program.",
+        },
+        {
+          text: "it copies the program into memory and sets up the addresses it will run at",
+          answer: "the loader",
+          why: "The loader puts the executable into memory ready to start.",
+        },
+        {
+          text: "it holds code that a program can call without the programmer rewriting it",
+          answer: "a library",
+          why: "A library is reusable code linked into or called by a program.",
+        },
+        {
+          text: "it turns source code into tokens and checks the order they appear in",
+          answer: "the compiler's lexical and syntax analysis",
+          why: "Tokens and structure are handled during translation, not by the linker or loader.",
+        },
+      ] as const;
+      const s = rng.pick(items);
+      return choiceQuestion(`Which component ${s.text}?`, s.answer, rng.sample(items.filter((x) => x.answer !== s.answer), 3).map((x) => x.answer), {
+        rng,
+        marks: 2,
+        solution: [step("Identify it", `**${s.answer}**.`), step("Why", s.why)],
+        takeaway: "Linker joins object files. Loader puts the program in memory. Library is reusable code.",
+      });
+    },
+  },
+  {
+    key: "cs-test-level-match",
+    base: 0.4,
+    span: 1.5,
+    build: ({ rng }) => {
+      const items = [
+        {
+          text: "testing a single function in isolation to check it returns what it should",
+          answer: "unit testing",
+          why: "Unit testing targets the smallest testable piece on its own.",
+        },
+        {
+          text: "checking that separately tested modules work correctly together",
+          answer: "integration testing",
+          why: "Integration testing looks for problems at the boundaries between components.",
+        },
+        {
+          text: "the real users carrying out realistic tasks to confirm the system does what they need",
+          answer: "user acceptance testing",
+          why: "UAT confirms the business need is met, not just that the code works.",
+        },
+        {
+          text: "comparing a finished program against a written specification to see which features are missing",
+          answer: "system testing",
+          why: "System testing measures the whole system against its specified requirements.",
+        },
+      ] as const;
+      const s = rng.pick(items);
+      return choiceQuestion(`Which testing technique covers this: ${s.text}?`, s.answer, rng.sample(items.filter((x) => x.answer !== s.answer), 3).map((x) => x.answer), {
+        rng,
+        marks: 2,
+        solution: [step("Name the level", `**${s.answer}**.`), step("Why", s.why)],
+        takeaway: "Unit = one piece. Integration = pieces together. UAT = the user accepts it. System = against the spec.",
+      });
+    },
+  },
+  {
+    key: "cs-requirements-user-vs-system",
+    base: 0.5,
+    span: 1.5,
+    build: ({ rng }) => {
+      const items = [
+        {
+          text: "\"the system must let a user search for flights by destination\"",
+          answer: "a user requirement",
+          why: "It describes what the user wants to achieve, stated in the user's own terms.",
+        },
+        {
+          text: "\"the system must return search results within two seconds for 500 concurrent users\"",
+          answer: "a system requirement",
+          why: "It specifies a measurable constraint on the system itself rather than the user's goal.",
+        },
+        {
+          text: "a system requirement states a constraint on the implementation, such as a response time or a storage volume",
+          answer: "system requirement",
+          why: "Constraints on the system are system requirements.",
+        },
+        {
+          text: "a user requirement states what the user needs to do, without prescribing how the system does it",
+          answer: "user requirement",
+          why: "The user states the goal; the design decides the mechanism.",
+        },
+      ] as const;
+      const s = rng.pick(items);
+      return choiceQuestion(`Which requirement does this describe: ${s.text}?`, s.answer, rng.sample(items.filter((x) => x.answer !== s.answer), 3).map((x) => x.answer), {
+        rng,
+        marks: 2,
+        solution: [step("Classify it", `**${s.answer}**.`), step("Why", s.why)],
+        takeaway: "User = what the person needs. System = a measurable constraint on the solution.",
+      });
+    },
+  },
+  {
+    key: "cs-maintenance-type",
+    base: 0.8,
+    span: 1.4,
+    build: ({ rng }) => {
+      const items = [
+        {
+          text: "routing around a fault that has appeared after release",
+          answer: "corrective",
+          why: "Corrective maintenance fixes bugs found in the working system.",
+        },
+        {
+          text: "upgrading the database driver before it stops being supported",
+          answer: "adaptive",
+          why: "Adaptive maintenance keeps the system working as its environment changes.",
+        },
+        {
+          text: "tidying and restructuring working code so future changes are easier",
+          answer: "perfective",
+          why: "Perfective maintenance improves quality or performance without fixing a fault.",
+        },
+        {
+          text: "removing a feature once the business no longer wants it",
+          answer: "perfective",
+          why: "Dropping an unwanted feature is a change to improve what the system does.",
+        },
+      ] as const;
+      const s = rng.pick(items);
+      return choiceQuestion(`This is an example of which type of maintenance: ${s.text}?`, s.answer, ["corrective", "adaptive", "perfective", "pre-emptive"].filter((x) => x !== s.answer).slice(0, 3), {
+        rng,
+        marks: 2,
+        solution: [step("Classify", `**${s.answer}**.`), step("Why", s.why)],
+        takeaway: "Corrective fixes faults. Adaptive adapts to change. Perfective improves.",
+      });
+    },
+  },
+  {
+    key: "cs-agile-practice",
+    base: 0.6,
+    span: 1.5,
+    build: ({ rng }) => {
+      const items = [
+        {
+          text: "two programmers work on the same code at the same time and review each other's work",
+          answer: "pair programming",
+          why: "Pair programming spreads knowledge and catches mistakes as the code is written.",
+        },
+        {
+          text: "a test is written before the code it tests, and the code is written to pass it",
+          answer: "test-driven development",
+          why: "TDD writes the failing test first, which pins down the required behaviour.",
+        },
+        {
+          text: "code is merged into a shared main branch many times a day and must build and pass its tests to be accepted",
+          answer: "continuous integration",
+          why: "Frequent integration with automated checks stops branches diverging for long.",
+        },
+        {
+          text: "iterative prototypes are built rapidly to explore what the user actually wants before committing to a design",
+          answer: "rapid application development",
+          why: "RAD uses fast throwaway prototypes to reduce the risk of building the wrong thing.",
+        },
+      ] as const;
+      const s = rng.pick(items);
+      return choiceQuestion(`Which practice or method does this describe: ${s.text}?`, s.answer, rng.sample(items.filter((x) => x.answer !== s.answer), 3).map((x) => x.answer), {
+        rng,
+        marks: 2,
+        solution: [step("Name it", `**${s.answer}**.`), step("Why", s.why)],
+        takeaway: "All of these are agile, with short cycles and frequent customer involvement.",
+      });
+    },
+  },
+  {
+    key: "cs-language-classification",
+    base: 0.1,
+    span: 1.4,
+    build: ({ rng }) => {
+      const items = [
+        {
+          text: "a language made of the binary instructions a processor executes directly, with no translation step",
+          answer: "machine code",
+          why: "Machine code is the processor's own instruction set, needing nothing between it and the hardware.",
+        },
+        {
+          text: "a symbolic language using mnemonics such as MOV and ADD that is translated into machine code",
+          answer: "assembly language",
+          why: "Assembly is a readable form of machine code using operation codes and operands.",
+        },
+        {
+          text: "a language that runs without being compiled, commonly used inside web pages or to automate a task",
+          answer: "a scripting language",
+          why: "Scripting languages are interpreted and are valued for being quick to write.",
+        },
+        {
+          text: "a portable language that must be translated before it can run, such as Python or Java",
+          answer: "a high-level language",
+          why: "High-level languages abstract the machine and trade some control for portability and speed of writing.",
+        },
+      ] as const;
+      const s = rng.pick(items);
+      return choiceQuestion(`Which type of programming language is being described: ${s.text}?`, s.answer, rng.sample(items.filter((x) => x.answer !== s.answer), 3).map((x) => x.answer), {
+        rng,
+        marks: 2,
+        solution: [step("Classify it", `**${s.answer}**.`), step("Why", s.why)],
+        takeaway: "Machine code → assembly → high-level → scripting, trading control for readability.",
+      });
+    },
+  },
+  {
+    key: "cs-addressing-mode",
+    base: 0.9,
+    span: 1.5,
+    build: ({ rng }) => {
+      const items = [
+        {
+          text: "the operand is the value held in the address the instruction names",
+          answer: "direct addressing",
+          why: "Direct addressing uses the address in the instruction as the location of the data.",
+        },
+        {
+          text: "the address the instruction names holds the address of the data",
+          answer: "indirect addressing",
+          why: "Indirect addressing dereferences: the named location contains a pointer, not the data itself.",
+        },
+        {
+          text: "the data is treated as a number and is added to the address in the instruction",
+          answer: "indexed addressing",
+          why: "Indexed addressing adds a register's value to the base address, which suits array access.",
+        },
+        {
+          text: "the instruction names no memory location at all, because the value is already in a named register",
+          answer: "implied or immediate addressing",
+          why: "Implied addressing takes the operand from a fixed place such as the accumulator, which is the shortest encoding.",
+        },
+      ] as const;
+      const s = rng.pick(items);
+      return choiceQuestion(`In assembly language, which addressing mode is being used when ${s.text}?`, s.answer, rng.sample(items.filter((x) => x.answer !== s.answer), 3).map((x) => x.answer), {
+        rng,
+        marks: 3,
+        solution: [step("Identify the mode", `**${s.answer}**.`), step("Why", s.why)],
+        takeaway: "Direct names the data. Indirect names a pointer. Indexed adds a register. Implied takes it from a fixed place.",
+      });
+    },
+  },
+  {
+    key: "cs-language-tradeoff",
+    base: 0.5,
+    span: 1.4,
+    build: ({ rng }) => {
+      const items = [
+        {
+          text: "it gives precise control over the processor and produces the fastest code",
+          answer: "assembly or machine code",
+          why: "Being close to the machine is what makes it fast, and it is also why it is hard to write.",
+        },
+        {
+          text: "it is portable between processor families and far quicker to write for the same task",
+          answer: "a high-level language",
+          why: "Portability and speed of writing come from the abstraction, paid for with a translation step.",
+        },
+        {
+          text: "it is very hard to debug and errors are only found when the program runs",
+          answer: "assembly or machine code",
+          why: "Low-level languages have no compiler checking, so mistakes surface late.",
+        },
+        {
+          text: "it needs a compiler or interpreter and cannot be run directly by the processor",
+          answer: "a high-level language",
+          why: "The processor executes only machine code, so anything else needs translating first.",
+        },
+      ] as const;
+      const s = rng.pick(items);
+      return choiceQuestion(`Which kind of language is being described: ${s.text}?`, s.answer, rng.sample(items.filter((x) => x.answer !== s.answer), 3).map((x) => x.answer), {
+        rng,
+        marks: 2,
+        solution: [step("Answer", `**${s.answer}**.`), step("Why", s.why)],
+        takeaway: "Low-level: fast, precise, painful. High-level: portable, readable, needs translating.",
+      });
+    },
+  },
+  {
+    key: "cs-paradigm-match",
+    base: 0.6,
+    span: 1.5,
+    build: ({ rng }) => {
+      const items = [
+        {
+          text: "the program is a sequence of instructions that change variables, and the program follows that sequence",
+          answer: "procedural",
+          why: "Procedural programming organises code as a sequence of operations on data.",
+        },
+        {
+          text: "data and the operations on it are bundled into objects that send messages to each other",
+          answer: "object-oriented",
+          why: "Object-oriented languages model the problem as objects with state and behaviour.",
+        },
+        {
+          text: "the programmer states what the result should be and leaves the method to the language",
+          answer: "declarative",
+          why: "Declarative languages describe the desired outcome, such as SQL, rather than the steps.",
+        },
+        {
+          text: "many separate tasks are interleaved and share the same processor cores over time",
+          answer: "concurrent",
+          why: "Concurrency is about structuring a program as interleaving tasks, not necessarily running them at once.",
+        },
+      ] as const;
+      const s = rng.pick(items);
+      return choiceQuestion(`Which paradigm does this describe: ${s.text}?`, s.answer, rng.sample(items.filter((x) => x.answer !== s.answer), 3).map((x) => x.answer), {
+        rng,
+        marks: 2,
+        solution: [step("Name the paradigm", `**${s.answer}**.`), step("Why", s.why)],
+        takeaway: "Procedural = steps. Object-oriented = objects and messages. Declarative = state the result. Concurrent = interleaving tasks.",
+      });
+    },
+  },
+  {
+    key: "cs-relational-algebra",
+    base: 0.5,
+    span: 1.5,
+    build: ({ rng }) => {
+      const items = [
+        {
+          text: "keep only the rows matching a condition",
+          answer: "selection",
+          why: "Selection filters rows, and reduces the columns never — that is projection's job.",
+        },
+        {
+          text: "keep only the named columns",
+          answer: "projection",
+          why: "Projection chooses which attributes appear in the result.",
+        },
+        {
+          text: "combine the rows of two tables using a matching column",
+          answer: "join",
+          why: "A join matches rows across tables on a shared key.",
+        },
+        {
+          text: "sort the result into ascending order by one column",
+          answer: "not standard relational algebra; ordering is done in SQL with ORDER BY",
+          why: "Classical relational algebra has no ordering operation, which is a deliberate choice because relations are unordered.",
+        },
+      ] as const;
+      const s = rng.pick(items);
+      return choiceQuestion(`In relational algebra, which operation ${s.text}?`, s.answer, rng.sample(items.filter((x) => x.answer !== s.answer), 3).map((x) => x.answer), {
+        rng,
+        marks: 2,
+        solution: [step("Name the operation", `**${s.answer}**.`), step("Why", s.why)],
+        takeaway: "Selection filters rows, projection filters columns, join combines tables.",
+      });
+    },
+  },
+  {
+    key: "cs-sql-statement",
+    base: 0.4,
+    span: 1.5,
+    build: ({ rng }) => {
+      const items = [
+        { text: "retrieve the names and email addresses of all customers over 18", answer: "SELECT name, email FROM Customer WHERE age > 18" },
+        { text: "add a new row to the Customer table", answer: "INSERT INTO Customer (name, email) VALUES (...)" },
+        { text: "change the email address of one existing customer", answer: "UPDATE Customer SET email = ... WHERE id = ..." },
+        { text: "remove a customer who has asked to be deleted", answer: "DELETE FROM Customer WHERE id = ..." },
+      ] as const;
+      const s = rng.pick(items);
+      return choiceQuestion(`Which SQL statement would you use to ${s.text}?`, s.answer, rng.sample(items.filter((x) => x.answer !== s.answer), 3).map((x) => x.answer), {
+        rng,
+        marks: 2,
+        solution: [
+          step("Choose the verb", `**${s.answer}**`),
+          step("Why", "SELECT reads, INSERT adds, UPDATE changes, DELETE removes. WHERE limits which rows are affected."),
+        ],
+        takeaway: "The four verbs cover everything: SELECT, INSERT, UPDATE, DELETE.",
+      });
+    },
+  },
+  {
+    key: "cs-switching-mode",
+    base: 0.3,
+    span: 1.5,
+    build: ({ rng }) => {
+      const items = [
+        {
+          text: "data is split into packets that each carry a header with source, destination and sequence information",
+          answer: "packet switching",
+          why: "A packet header carries what the network needs to route and reassemble the data.",
+        },
+        {
+          text: "a dedicated path is reserved for the whole conversation and nobody else can use that bandwidth",
+          answer: "circuit switching",
+          why: "Circuit switching guarantees a fixed route and bandwidth for the duration.",
+        },
+        {
+          text: "the largest payload a packet can carry before it has to be split, set by the underlying protocol",
+          answer: "MTU, the maximum transmission unit",
+          why: "A packet larger than the MTU must be fragmented or rejected.",
+        },
+        {
+          text: "a packet arrives out of order and the receiver must reorder it using the sequence numbers in the header",
+          answer: "packet switching",
+          why: "Independent packets take different routes, so sequencing is the receiver's job.",
+        },
+      ] as const;
+      const s = rng.pick(items);
+      return choiceQuestion(`Which term matches: ${s.text}?`, s.answer, rng.sample(items.filter((x) => x.answer !== s.answer), 3).map((x) => x.answer), {
+        rng,
+        marks: 2,
+        solution: [step("Answer", `**${s.answer}**.`), step("Why", s.why)],
+        takeaway: "Packet switching shares links and needs headers. Circuit switching reserves a path.",
+      });
+    },
+  },
+  {
+    key: "cs-network-hardware",
+    base: 0.4,
+    span: 1.4,
+    build: ({ rng }) => {
+      const items = [
+        {
+          text: "it connects two different networks together and decides which way to send a packet",
+          answer: "a router",
+          why: "A router forwards packets between networks using an IP address.",
+        },
+        {
+          text: "it connects devices within one local network and sends frames using MAC addresses",
+          answer: "a switch",
+          why: "A switch operates at the data link layer and learns which port each device is on.",
+        },
+        {
+          text: "it links two LANs using addresses at the data link layer, so the devices look as if they are on one network",
+          answer: "a bridge",
+          why: "A bridge joins LAN segments at layer 2, reducing unnecessary traffic between them.",
+        },
+        {
+          text: "it converts a digital signal into one a telephone line can carry, and back again",
+          answer: "a modem",
+          why: "Modulation is the job of a modem, modulator and demodulator.",
+        },
+      ] as const;
+      const s = rng.pick(items);
+      return choiceQuestion(`Which piece of network hardware ${s.text}?`, s.answer, rng.sample(items.filter((x) => x.answer !== s.answer), 3).map((x) => x.answer), {
+        rng,
+        marks: 2,
+        solution: [step("Identify it", `**${s.answer}**.`), step("Why", s.why)],
+        takeaway: "Router = between networks, IP. Switch = within a LAN, MAC. Bridge = joins LANs. Modem = analogue conversion.",
+      });
+    },
+  },
+  {
+    key: "cs-client-vs-server-side",
+    base: 0.4,
+    span: 1.5,
+    build: ({ rng }) => {
+      const items = [
+        {
+          text: "the code runs in the user's browser and the user can view and alter it with the browser's developer tools",
+          answer: "client-side",
+          why: "Client-side code is delivered to the browser, so it is visible to the user and cannot be trusted.",
+        },
+        {
+          text: "the code runs on the web server, so the user never receives it and it can hold secrets such as passwords",
+          answer: "server-side",
+          why: "Server-side code never reaches the client, which is why it can hold credentials safely.",
+        },
+        {
+          text: "a login page checks a password with JavaScript in the browser before sending anything",
+          answer: "client-side, and it is a security flaw",
+          why: "Client-side checks can be bypassed by editing the page, so authentication must be verified on the server.",
+        },
+        {
+          text: "an email confirmation link is generated by the server and the result is stored server-side",
+          answer: "server-side",
+          why: "The state must be held somewhere the user cannot edit, which means the server.",
+        },
+      ] as const;
+      const s = rng.pick(items);
+      return choiceQuestion(`Which is true of this: ${s.text}?`, s.answer, rng.sample(items.filter((x) => x.answer !== s.answer), 3).map((x) => x.answer), {
+        rng,
+        marks: 2,
+        solution: [step("Answer", `**${s.answer}**.`), step("Why", s.why)],
+        takeaway: "Never trust the client. Anything secret or security-relevant has to be checked server-side.",
+      });
+    },
+  },
+  {
+    key: "cs-session-cookie",
+    base: 0.7,
+    span: 1.4,
+    build: ({ rng }) => {
+      const items = [
+        {
+          text: "HTTP is stateless, so the server must send something with each request to identify a returning user",
+          answer: "a cookie or session token",
+          why: "A cookie lets the server recognise the user across separate, otherwise unconnected requests.",
+        },
+        {
+          text: "a shopping basket is remembered between two visits to the site without the pages being a single continuous session",
+          answer: "a cookie or session token",
+          why: "The basket is held against the token the browser returns on the next request.",
+        },
+        {
+          text: "the server can tell each user apart even though the protocol itself keeps no memory between requests",
+          answer: "state is being maintained with sessions",
+          why: "That is exactly the gap sessions exist to fill.",
+        },
+        {
+          text: "the page could read a user's banking details directly from the HTML the server sent",
+          answer: "not necessarily; the HTML only carries whatever the server chose to include",
+          why: "Client-side state is whatever the page was sent. Secrets must never be put there.",
+        },
+      ] as const;
+      const s = rng.pick(items);
+      return choiceQuestion(`Which statement about state is correct: ${s.text}?`, s.answer, rng.sample(items.filter((x) => x.answer !== s.answer), 3).map((x) => x.answer), {
+        rng,
+        marks: 2,
+        solution: [step("Answer", `**${s.answer}**.`), step("Why", s.why)],
+        takeaway: "HTTP remembers nothing. Sessions and cookies add the memory, and the server holds the real state.",
+      });
+    },
+  },
+  {
+    key: "cs-lifecycle-choice",
+    base: 0.3,
+    span: 1.5,
+    build: ({ rng }) => {
+      const scenarios = [
+        {
+          text: "the requirements are fully understood and fixed before any code is written",
+          answer: "waterfall",
+          why: "Waterfall completes each stage in order and only then moves on, which suits fixed requirements.",
+        },
+        {
+          text: "the customer is working in the team and releases are made every two weeks",
+          answer: "extreme programming",
+          why: "XP is an agile method built around short cycles, pair programming and the customer on the team.",
+        },
+        {
+          text: "the risk is high and each loop brings the design closer before anything is built",
+          answer: "the spiral model",
+          why: "The spiral model repeats design, build, test and review, tightening the design each time round.",
+        },
+      ] as const;
+      const s = rng.pick(scenarios);
+      return choiceQuestion(
+        `A project has ${s.text}. Which lifecycle or methodology fits best?`,
+        s.answer,
+        ["waterfall", "extreme programming", "the spiral model"].filter((x) => x !== s.answer).slice(0, 2),
+        {
+          rng,
+          marks: 3,
+          solution: [step("Match the method to its strength", s.why)],
+          takeaway:
+            "Waterfall suits fixed requirements. XP suits rapid iteration with the customer. The spiral model suits high risk and repeated design.",
+        },
+      );
+    },
+  },
+  {
+    key: "cs-normalisation",
+    base: 1.3,
+    span: 1.5,
+    build: ({ rng }) => {
+      const questions = [
+        {
+          text: "A table repeats groups of columns, such as three columns all holding a different phone number for the same customer.",
+          answer: "1NF",
+          why: "1NF requires atomic values: one value per cell. Repeating columns are removed into a separate table.",
+        },
+        {
+          text: "A table is in 1NF, but a non-key column depends on only part of a composite key.",
+          answer: "2NF",
+          why: "2NF removes a partial dependency by splitting the table so each key identifies a row on its own.",
+        },
+        {
+          text: "A table is in 2NF, but a non-key column depends on another non-key column rather than on the key.",
+          answer: "3NF",
+          why: "3NF removes a transitive dependency: everything must depend on the key, the whole key, and nothing but the key.",
+        },
+      ] as const;
+      const q = rng.pick(questions);
+      return choiceQuestion(
+        `A relational table has this problem: ${q.text} Which normal form does fixing it produce?`,
+        q.answer,
+        ["1NF", "2NF", "3NF"].filter((x) => x !== q.answer).slice(0, 2),
+        {
+          rng,
+          marks: 3,
+          solution: [
+            step("Recall each normal form", "1NF is atomic values. 2NF is no partial dependencies. 3NF is no transitive dependencies."),
+            step("Apply it", q.why),
+          ],
+          takeaway:
+            "1NF: one value per cell. 2NF: no partial dependency on a composite key. 3NF: no transitive dependency on a non-key column.",
+        },
+      );
+    },
+  },
+  {
+    key: "cs-database-key",
+    base: 0.6,
+    span: 1.4,
+    build: ({ rng }) => {
+      const keys = [
+        {
+          name: "primary key",
+          job: "uniquely identifies each record in the table",
+        },
+        {
+          name: "foreign key",
+          job: "links a record in one table to the primary key of a record in another",
+        },
+      ] as const;
+      const correct = rng.pick(keys);
+      return choiceQuestion(
+        `In a relational database, which key ${correct.job}?`,
+        correct.name,
+        correct.name === "primary key" ? ["foreign key", "secondary index"] : ["primary key", "secondary index"],
+        {
+          rng,
+          marks: 2,
+          solution: [
+            step("Separate the two", "A **primary key** uniquely identifies a record. A **foreign key** points at another table's primary key, which is how tables are joined."),
+            step("Apply it", `Here it is the **${correct.name}**.`),
+          ],
+          takeaway:
+            "Primary key = identifies a record within its table. Foreign key = references a record in another table.",
+        },
+      );
+    },
+  },
+  {
+    key: "cs-network-type",
+    base: -0.6,
+    span: 1.3,
+    build: ({ rng }) => {
+      const types = [
+        { name: "LAN", example: "a school or office connecting its own computers" },
+        { name: "WAN", example: "a company linking sites in different countries" },
+        { name: "client-server", example: "a web server that many users' browsers request pages from" },
+        { name: "peer-to-peer", example: "a file-sharing network where every computer is both client and server" },
+      ] as const;
+      const t = rng.pick(types);
+      const others = types.filter((x) => x.name !== t.name);
+      return choiceQuestion(
+        `Which network type best describes ${t.example}?`,
+        t.name,
+        rng.sample(others, 3).map((x) => x.name),
+        {
+          rng,
+          marks: 2,
+          solution: [
+            step("Weigh scale and structure", "A LAN is small and local. A WAN spans large distances, usually over the internet. Client-server centralises resources; peer-to-peer shares them."),
+            step("Apply it", `${t.example} is **${t.name}**.`),
+          ],
+          takeaway:
+            "LAN = local and small. WAN = across distance. Client-server = one central machine. Peer-to-peer = every machine does both jobs.",
+        },
+      );
+    },
+  },
+  {
+    key: "cs-http-status",
+    base: 0.5,
+    span: 1.6,
+    build: ({ rng }) => {
+      const codes = [
+        { code: 200, meaning: "the request succeeded" },
+        { code: 404, meaning: "the requested resource was not found" },
+        { code: 500, meaning: "the server hit an unexpected error" },
+        { code: 301, meaning: "the resource has moved permanently to a new URL" },
+      ] as const;
+      const c = rng.pick(codes);
+      const others = codes.filter((x) => x.code !== c.code);
+      return choiceQuestion(
+        `A browser sends a request and the server responds with **${c.code}**. What does that status code tell the user?`,
+        c.meaning,
+        rng.sample(others, 3).map((x) => x.meaning),
+        {
+          rng,
+          marks: 3,
+          solution: [
+            step(
+              "Use the class",
+              "2xx means success. 3xx is a redirect. 4xx is a client error. 5xx is a server error.",
+            ),
+            step("Apply it", `${c.code} falls in the ${String(c.code)[0]}xx class, so it means ${c.meaning}.`),
+          ],
+          takeaway:
+            "2xx success, 3xx redirect, 4xx client error, 5xx server error. 404 is missing, 500 is a server fault.",
+        },
+      );
+    },
+  },
+  {
+    key: "cs-protocol-layering",
+    base: 1.2,
+    span: 1.4,
+    build: ({ rng }) => {
+      const layers = [
+        { name: "TCP", job: "reassembles packets into the correct order and makes the connection reliable" },
+        { name: "IP", job: "routes packets between networks using addresses" },
+        { name: "HTTP", job: "requests and returns web pages" },
+        { name: "DNS", job: "turns a domain name into an IP address" },
+      ] as const;
+      const l = rng.pick(layers);
+      return choiceQuestion(
+        `Which protocol or service ${l.job}?`,
+        l.name,
+        rng.sample(layers.filter((x) => x.name !== l.name), 3).map((x) => x.name),
+        {
+          rng,
+          marks: 2,
+          solution: [
+            step("Place it in the stack", "DNS resolves names, HTTP is the web protocol, TCP gives reliable ordered delivery, and IP routes packets."),
+            step("Apply it", `${l.job} is **${l.name}**.`),
+          ],
+          takeaway: "DNS resolves names, HTTP requests pages, TCP delivers reliably, IP routes.",
+        },
+      );
+    },
+  },
+  {
+    key: "cs-box-model",
+    base: 0.7,
+    span: 1.3,
+    build: ({ rng }) => {
+      const properties = [
+        "padding",
+        "border",
+        "margin",
+        "content",
+      ] as const;
+      const p = rng.pick(properties);
+      const inside = p === "content" || p === "padding" || p === "border";
+      return choiceQuestion(
+        `In the CSS box model, the **${p}** area is ${inside ? "inside" : "outside"} the border.`,
+        inside ? "inside the border" : "outside the border",
+        inside ? ["outside the border", "not part of the box at all"] : ["inside the border", "not part of the box at all"],
+        {
+          rng,
+          marks: 2,
+          solution: [
+            step(
+              "Order the box",
+              "From the inside out: content, then padding, then border, then margin.",
+            ),
+            step("Apply it", `**${p}** is ${inside ? "inside" : "outside"} the border.`),
+          ],
+          takeaway:
+            "Inside the border: content, padding. Outside the border: margin. Padding is inside the box and pushes the content in; margin is outside and separates boxes.",
+          context: "Margin does not affect the element's own size, only the space around it.",
+        },
+      );
+    },
+  },
+];
+
 // ================================================================ registration
 
+/*
+  Registration.
+
+  Every chapter is wired to the generator set that matches its own specification
+  content. The previous version mapped 1.1.1 "Structure and function of the
+  processor" to the number-representation templates, which is why the processor
+  chapter asked about bits, and gave 1.1.2 and 1.1.3 the same wrong set.
+
+  Chapter ids whose numbers do not exist in the specification (ocr-p1, ocr-2.2.3
+  and so on) are deliberately not registered: a generator registered against an
+  id no chapter owns can never be selected, so it is dead weight that also makes
+  the coverage report overstate how much content a chapter has.
+*/
+
+/*
+  Chapter registrations.
+
+  These were originally one shared pool per topic area, which passed a coverage
+  check while being wrong: a learner on "Databases" could be asked about the box
+  model, and one on "Web technologies" about a deadlock. Passing the chapter title
+  to a filter built from the chapter's own spec content is the fix, and the
+  template-level topic test in tests/difficulty-and-topics.test.ts is what stops
+  it drifting back.
+*/
+
+// 1.1.1 is the machine itself; 1.1.2 is the choice between processors, so the
+// fetch-execute and register templates belong to the first and the CISC, RISC,
+// GPU and performance templates to the second.
+const processorCore = processorGenerators.filter((g) =>
+  g.key.startsWith("cs-register-") || g.key.startsWith("cs-bus-") || g.key.startsWith("cs-fetch-execute-"),
+);
+const processorTypes = processorGenerators.filter(
+  (g) =>
+    g.key === "cs-cisc-risc-match" ||
+    g.key === "cs-amdahl-speedup" ||
+    g.key === "cs-processor-performance" ||
+    g.key === "cs-gpu-multicore",
+);
+
+registerGenerators(["ocr-1.1.1"], processorCore);
+registerGenerators(["ocr-1.1.2"], processorTypes);
+registerGenerators(["ocr-1.1.3"], storageGenerators);
+
+// 1.2.1 Systems software: the OS itself.
 registerGenerators(
-  ["ocr-p1", "ocr-p2", "ocr-p3"],
-  [...representationGenerators, ...algorithmicGenerators],
+  ["ocr-1.2.1"],
+  systemsGenerators.filter(
+    (g) =>
+      g.key === "cs-os-component-role" ||
+      g.key === "cs-memory-management" ||
+      g.key === "cs-scheduler-policy" ||
+      g.key === "cs-interrupt-vs-polling" ||
+      g.key === "cs-deadlock-conditions",
+  ),
+);
+
+// 1.2.2 Applications generation: translation and testing.
+registerGenerators(
+  ["ocr-1.2.2"],
+  systemsGenerators.filter(
+    (g) =>
+      g.key === "cs-translation-stage" ||
+      g.key === "cs-compiler-vs-interpreter" ||
+      g.key === "cs-linker-loader-library" ||
+      g.key === "cs-test-level-match",
+  ),
+);
+
+// 1.2.3 Software development: lifecycles, requirements and maintenance.
+registerGenerators(
+  ["ocr-1.2.3"],
+  systemsGenerators.filter(
+    (g) =>
+      g.key === "cs-lifecycle-choice" ||
+      g.key === "cs-agile-practice" ||
+      g.key === "cs-requirements-user-vs-system" ||
+      g.key === "cs-maintenance-type",
+  ),
+);
+
+// 1.2.4 Types of programming language: classification, assembly and paradigms.
+registerGenerators(
+  ["ocr-1.2.4"],
+  systemsGenerators.filter(
+    (g) =>
+      g.key === "cs-language-classification" ||
+      g.key === "cs-addressing-mode" ||
+      g.key === "cs-language-tradeoff" ||
+      g.key === "cs-paradigm-match",
+  ),
+);
+
+// 1.3.1 is compression, encryption and hashing. The compression and RLE
+// templates live in dataTypeGenerators for historical reasons, so they are
+// pulled in by key rather than duplicating them.
+registerGenerators(
+  ["ocr-1.3.1"],
+  [...securityGenerators, ...dataTypeGenerators.filter((g) => g.key.startsWith("cs-compression") || g.key.startsWith("cs-rle"))],
 );
 registerGenerators(
-  ["ocr-1.1.1", "ocr-1.1.2", "ocr-1.1.3"],
-  representationGenerators,
+  ["ocr-1.3.2"],
+  systemsGenerators.filter((g) => g.key === "cs-database-key" || g.key === "cs-normalisation" || g.key === "cs-relational-algebra" || g.key === "cs-sql-statement"),
 );
 registerGenerators(
-  ["ocr-1.2.1", "ocr-1.2.2", "ocr-1.2.3", "ocr-1.2.4"],
-  dataTypeGenerators,
+  ["ocr-1.3.3"],
+  systemsGenerators.filter(
+    (g) => g.key === "cs-network-type" || g.key === "cs-protocol-layering" || g.key === "cs-switching-mode" || g.key === "cs-network-hardware",
+  ),
 );
-registerGenerators(["ocr-1.3.1", "ocr-1.3.2", "ocr-1.3.3", "ocr-1.3.4"], securityGenerators);
-registerGenerators(["ocr-1.4.1", "ocr-1.4.2", "ocr-1.4.3"], structureDataGenerators);
+registerGenerators(
+  ["ocr-1.3.4"],
+  systemsGenerators.filter(
+    (g) => g.key === "cs-http-status" || g.key === "cs-box-model" || g.key === "cs-client-vs-server-side" || g.key === "cs-session-cookie",
+  ),
+);
+
+// 1.4.1 is data types. The compression and RLE templates are excluded because
+// they belong to 1.3.1 and would be off-topic here.
+registerGenerators(
+  ["ocr-1.4.1"],
+  [
+    ...representationGenerators,
+    ...dataTypeGenerators.filter((g) => !g.key.startsWith("cs-compression") && !g.key.startsWith("cs-rle")),
+  ],
+);
+registerGenerators(["ocr-1.4.2"], structureDataGenerators);
+// 1.4.3 is Boolean algebra, which algorithmicGenerators covers.
+registerGenerators(["ocr-1.4.3"], algorithmicGenerators);
 registerGenerators(
   ["ocr-1.5.1", "ocr-1.5.2"],
   // 1.5.1 is legal and ethical, which leans on the data-protection material,
@@ -1197,8 +3200,5 @@ registerGenerators(
   ["ocr-2.1.1", "ocr-2.1.2", "ocr-2.1.3", "ocr-2.1.4", "ocr-2.1.5"],
   algorithmicGenerators,
 );
-registerGenerators(
-  ["ocr-2.2.1", "ocr-2.2.2", "ocr-2.2.3", "ocr-2.2.4", "ocr-2.2.5"],
-  programmingGenerators,
-);
-registerGenerators(["ocr-2.3.1", "ocr-2.3.2", "ocr-2.3.3"], paradigmGenerators);
+registerGenerators(["ocr-2.2.1", "ocr-2.2.2"], programmingGenerators);
+registerGenerators(["ocr-2.3.1"], [...programmingGenerators, ...paradigmGenerators]);

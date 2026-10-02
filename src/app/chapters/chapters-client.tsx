@@ -145,7 +145,7 @@ export function ChaptersPage() {
           <EmptyState title="No match" body={`Nothing in ${meta.shortName} matches “${query}”.`} />
         </div>
       ) : (
-        <div className="panel divide-y divide-line">
+        <div className="panel divide-y divide-rule">
           {visible.map((chapter) => (
             <ChapterRow
               key={chapter.id}
@@ -283,7 +283,7 @@ function ChapterRow({
 
               {chapter.knowledge.examTip ? (
                 <p className="prose-note">
-                  <span className="text-ink-1">In the exam:</span>{" "}
+                  <span className="text-ink-2">In the exam:</span>{" "}
                   {chapter.knowledge.examTip}
                 </p>
               ) : null}

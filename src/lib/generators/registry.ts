@@ -4,6 +4,7 @@ import type { Generator, QuestionBody } from "./types";
 import { assemble, choiceQuestion, difficultyToTier, step } from "./types";
 import { CHAPTERS_BY_SUBJECT, getChapter } from "@/lib/specs";
 import { Rng } from "@/lib/rng";
+import { clamp } from "@/lib/math-utils";
 
 /**
  * Knowledge generators, built from authored chapter content.
@@ -210,6 +211,68 @@ const SUBJECT_REGISTRY: Record<string, Generator[]> = {};
  */
 const KNOWLEDGE_BIAS = 0.35;
 
+/**
+ * Distance charged for having used a template earlier in the session.
+ *
+ * The caller's recent-template list is ordered oldest first, so the newest entry
+ * is charged the full penalty and older entries are charged progressively less.
+ * Scaling by recency is what makes this work: a flat penalty treats a template
+ * used twelve questions ago as bad as the one just shown, so over a long
+ * session the chapter runs out of eligible templates and the selector starts
+ * repeating the same pair regardless of what else it has.
+ */
+const REPEAT_PENALTY_NEWEST = 1.4;
+const REPEAT_PENALTY_OLDEST = 0.6;
+
+/**
+ * How far a candidate may sit from the best match and still be eligible.
+ *
+ * This is what keeps variety from costing difficulty precision. The repeat
+ * penalty is charged before the window is taken, so a just-used template falls
+ * out and lets a fresher one in, but only if that fresher one is a genuine
+ * match for the target difficulty rather than merely unused.
+ *
+ * The two numbers are chosen together, and the constraint is the important part:
+ * the penalty floor (0.6) is larger than the tolerance (0.45). A template used
+ * anywhere in the last twelve therefore scores worse than the tolerance allows,
+ * so it leaves the window whenever a fresh template is a legitimate match. With a
+ * smaller floor the penalty decayed to nothing, a template that had aged out of
+ * the newest slot came straight back, and the selector settled into a loop over
+ * the two or three nearest templates - which is the behaviour being fixed here.
+ */
+const MATCH_TOLERANCE = 0.45;
+
+/** How many of the best matches to sample among once the window is set. */
+const CANDIDATE_WINDOW = 3;
+
+/**
+ * How much of a template's calibrated difficulty is mixed into what is served.
+ *
+ * Small on purpose. Calibration is evidence that a template has proved easier
+ * or harder than its author declared, which should nudge the served difficulty,
+ * not override what the learner asked for. At 1 the preference would have no
+ * effect at all, which is the behaviour this replaced.
+ */
+const CALIBRATION_BLEND = 0.25;
+
+/**
+ * Penalty for having used `key` already, scaled by how recently.
+ *
+ * Returns 0 when the template is absent from the list.
+ *
+ * Exported for tests, because the scaling is the part worth pinning down: a
+ * flat penalty preserves the relative order of a chapter's templates, so the
+ * selector keeps returning the same pair however many times it has been used.
+ */
+export function recencyPenalty(key: string, avoidKeys: string[]): number {
+  const index = avoidKeys.lastIndexOf(key);
+  if (index === -1) return 0;
+  // A single-entry list is by definition the most recent thing the learner saw.
+  if (avoidKeys.length === 1) return REPEAT_PENALTY_NEWEST;
+  const recency = index / (avoidKeys.length - 1);
+  return REPEAT_PENALTY_OLDEST + (REPEAT_PENALTY_NEWEST - REPEAT_PENALTY_OLDEST) * recency;
+}
+
 export function registerGenerators(chapterIds: string[], generators: Generator[]): void {
   for (const id of chapterIds) {
     SUBJECT_REGISTRY[id] = [...(SUBJECT_REGISTRY[id] ?? []), ...generators];
@@ -254,13 +317,16 @@ export function generateQuestion(options: GenerateOptions): GeneratedQuestion | 
   const pool = generatorsFor(chapter);
   if (pool.length === 0) return null;
 
-  const scored = pool.map((gen) => {
+const scored = pool.map((gen) => {
     // Calibrated difficulty where outcomes exist, hand-set otherwise. The
     // distance is measured against the effective value, and the served value is
     // used below, so selection and delivery agree.
     const calibration = templateCalibration(templateStats?.[gen.key], gen.base);
     const distance = Math.abs(calibration.effective - targetDifficulty);
-    const repeatPenalty = avoidKeys.includes(gen.key) ? 1.1 : 0;
+    // Charged as part of the score rather than applied after sorting, so a used
+    // template actually leaves the window and the fresher templates behind it
+    // become reachable.
+    const repeatPenalty = recencyPenalty(gen.key, avoidKeys);
     // Knowledge questions are the fallback, not the default. Without this bias
     // the selector happily returns a softer recall item for a learner who asked
     // for practice. Preferring the bespoke template by a small margin keeps the
@@ -274,23 +340,45 @@ export function generateQuestion(options: GenerateOptions): GeneratedQuestion | 
   });
   scored.sort((a, b) => a.score - b.score);
 
-  // Sample among the two closest so difficulty still varies within a tier.
-  //
-  // Widening this window buys template variety but costs difficulty precision,
-  // and precision is the point of an adaptive tool: a learner aiming at 1.5
-  // should not be served a 0.0 question. Variety is handled by the repeat
-  // penalty above instead, driven by the caller's recent-template list.
-  const top = scored.slice(0, Math.min(2, scored.length));
+  /*
+    Candidates are the templates within a tolerance of the best match, rather
+    than a fixed number of them.
+
+    A fixed window was the bug behind "only two questions per thing": it was
+    counted from the top, so a chapter whose two nearest templates had already
+    been used kept offering exactly those two while the rest of the pool was
+    never reachable. Scoring the repeat penalty first and then gating on
+    tolerance means an unused template that is still a legitimate match for the
+    target gets its turn, and a fresh template that is nothing like the target
+    still does not displace the right difficulty.
+  */
+  const best = scored[0]!.score;
+  const eligible = scored.filter((c) => c.score <= best + MATCH_TOLERANCE);
+  // The window on top of that keeps within-tier variation without letting a
+  // long chapter drift to whatever happens to be sitting further down the list.
+  const top = eligible.slice(0, Math.min(CANDIDATE_WINDOW, eligible.length));
   const picked = rng.pick(top);
 
   /*
-    The tier comes from the calibrated difficulty rather than the target, so a
-    template that has proved easier than declared gets a gentler tier, and the
-    question's stored difficulty is anchored to the same value in assemble. That
-    keeps the selection decision and the recorded difficulty telling the same
-    story, which matters because the model is calibrated on the stored value.
+    The served difficulty is the target, not the template's own centre.
+
+    This is the difference between a difficulty control that works and one that
+    only appears to. The target previously went no further than choosing which
+    template to run: both the tier and the recorded difficulty were then derived
+    from the template's calibrated centre, discarding it again. Asking for a
+    harder question therefore mostly re-ordered a pool whose items were then
+    served at their own declared level, so two chapters with a narrow spread of
+    templates produced identical output at every setting.
+
+    Anchoring on the target keeps three things true at once:
+    - the learner's chosen difficulty is what they actually get;
+    - a template that has proved easier than declared is nudged easier within its
+      own band, because its calibrated value is blended in below rather than
+      replacing the target;
+    - the recorded difficulty is the one the learner experienced, so the ability
+      model is fitted against a real value rather than a relabelled one.
   */
-  const effective = picked.calibration.effective;
+  const served = clamp(picked.calibration.effective * CALIBRATION_BLEND + targetDifficulty * (1 - CALIBRATION_BLEND), -3, 3.5);
 
   return assemble(
     chapter,
@@ -298,11 +386,11 @@ export function generateQuestion(options: GenerateOptions): GeneratedQuestion | 
     {
       rng,
       chapter,
-      targetDifficulty: effective,
-      tier: difficultyToTier(effective),
+      targetDifficulty: served,
+      tier: difficultyToTier(served),
       seed,
     },
-    effective,
+    served,
   );
 }
 

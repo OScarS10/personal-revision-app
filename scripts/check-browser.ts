@@ -431,6 +431,61 @@ async function main(): Promise<void> {
       }
     }
 
+    // ------------------------------------------------- the difficulty control
+    /*
+      The reported symptom was that setting a difficulty did nothing, so the
+      control has to be proved to reach stored state rather than merely render.
+
+      A rendered control that is never read back is the classic version of this
+      bug: the segmented buttons update local state and look correct, while the
+      value the session actually uses stays at its default. Selecting each
+      option and reloading is the cheapest check that the setting is persisted
+      and survives a fresh hydration, which is where a control wired to the
+      wrong store would fall over.
+    */
+    await cdp.goto("/practice");
+    if (await cdp.waitFor("!!document.querySelector('input[type=checkbox]')", "practice setup")) {
+      for (const setting of ["Gentle", "Challenging", "Standard"]) {
+        const clicked = await cdp.eval<boolean>(
+          `(() => {
+            const buttons = [...document.querySelectorAll('button')];
+            const target = buttons.find((b) => b.textContent.trim() === ${JSON.stringify(setting)});
+            if (!target) return false;
+            target.click();
+            return true;
+          })()`,
+        );
+        if (!clicked) {
+          fail("difficulty", `no ${setting} option on the practice setup screen`);
+          continue;
+        }
+        await new Promise((r) => setTimeout(r, 300));
+
+        // Read the persisted value rather than the pressed styling, since the
+        // styling is set by the same state that could be wrong.
+        const stored = await cdp.eval<string>(
+          "JSON.parse(localStorage.getItem('specwise.state.v1') || '{}')?.config?.difficulty ?? ''",
+        );
+        const expected = setting.toLowerCase();
+        if (stored !== expected) {
+          fail("difficulty", `chose ${setting} but stored config.difficulty is "${stored}"`);
+        }
+
+        // A reload proves it reached storage rather than just React state.
+        await cdp.goto("/practice");
+        await cdp.waitFor("!!document.querySelector('input[type=checkbox]')", "practice setup after reload");
+        const afterReload = await cdp.eval<string>(
+          "JSON.parse(localStorage.getItem('specwise.state.v1') || '{}')?.config?.difficulty ?? ''",
+        );
+        if (afterReload !== expected) {
+          fail("difficulty", `${setting} did not survive a reload (got "${afterReload}")`);
+        }
+      }
+      console.log("  difficulty control: all three settings persist across a reload");
+    } else {
+      fail("difficulty", "the practice setup screen never rendered, so the difficulty control was never checked");
+    }
+
     // ------------------------------------------------- a whole session
     /*
       Answering one question proves the marking path. Walking an entire session
@@ -811,3 +866,4 @@ main()
     console.error(`headless check could not run: ${String(err)}`);
     process.exit(1);
   });
+

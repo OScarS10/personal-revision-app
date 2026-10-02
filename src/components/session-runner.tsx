@@ -160,7 +160,7 @@ function SessionFooter({
         {answered > 0 ? (
           <>
             {" · "}
-            <span className={correct === answered ? "text-ok" : "text-ink-1"}>
+            <span className={correct === answered ? "text-ok" : "text-ink-2"}>
               {correct} correct
             </span>
           </>
@@ -230,7 +230,7 @@ function SessionResults({
       {summary.breakdown.length > 0 ? (
         <div className="mb-6">
           <SectionHead title="By chapter" />
-          <div className="panel divide-y divide-line">
+          <div className="panel divide-y divide-rule">
             {summary.breakdown.map((row) => {
               const acc = row.correct / row.attempted;
               return (
@@ -284,7 +284,7 @@ function SessionResults({
         <summary className="cursor-pointer text-[14px]">
           All {summary.entries.length} questions
         </summary>
-        <div className="mt-4 divide-y divide-line">
+        <div className="mt-4 divide-y divide-rule">
           {summary.entries.map((entry, i) => (
             <div key={`${entry.question.id}-${i}`} className="py-3">
               <div className="mb-1 flex items-center gap-2">
@@ -301,7 +301,7 @@ function SessionResults({
                 <div className="mt-1 text-[13px] text-ink-2">
                   <span className="num">{entry.answer.response.join(", ") || "no answer"}</span>
                   {" → "}
-                  <span className="num text-ink-1">{entry.question.answer}</span>
+                  <span className="num text-ink-2">{entry.question.answer}</span>
                 </div>
               ) : null}
             </div>

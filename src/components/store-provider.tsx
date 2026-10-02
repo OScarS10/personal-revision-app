@@ -15,6 +15,7 @@ import { recordTemplateStat } from "@/lib/calibration";
 import type { StorageLike } from "@/lib/store";
 import { applyAnswer, propagateAbilities } from "@/lib/model";
 import { getChapters, SUBJECT_ORDER } from "@/lib/specs";
+import type { DifficultyPreference } from "@/lib/difficulty";
 
 /*
   Registering the generators is a side effect of importing them.
@@ -98,6 +99,7 @@ export interface StoreValue {
   resetAll(): void;
   resetSubject(subject: SubjectId): void;
   setExamDate(subject: SubjectId, at: number | null): void;
+  setDifficulty(preference: DifficultyPreference): void;
   markExported(): void;
 }
 
@@ -124,6 +126,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const setChapters = useCallback((subject: SubjectId, chapterIds: string[]) => {
     const prev = backing.getSnapshot();
     backing.commit({ ...prev, enabled: { ...prev.enabled, [subject]: chapterIds } });
+  }, []);
+
+  /*
+    Difficulty is a config field rather than per-subject state: it expresses how
+    the learner wants to be challenged in general, not a property of one
+    specification. Writes straight through to the persisted config so it survives
+    a reload and travels with a backup.
+  */
+  const setDifficulty = useCallback((preference: DifficultyPreference) => {
+    const prev = backing.getSnapshot();
+    if (prev.config.difficulty === preference) return;
+    backing.commit({ ...prev, config: { ...prev.config, difficulty: preference } });
   }, []);
 
   const recordAnswer = useCallback((answer: Answer) => {
@@ -272,6 +286,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       resetSubject,
       setExamDate,
       markExported,
+      setDifficulty,
     }),
     [
       state,
@@ -287,6 +302,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       resetSubject,
       setExamDate,
       markExported,
+      setDifficulty,
     ],
   );
 
@@ -306,6 +322,7 @@ const FALLBACK: StoreValue = {
   resetAll: () => {},
   resetSubject: () => {},
   setExamDate: () => {},
+  setDifficulty: () => {},
   markExported: () => {},
 };
 

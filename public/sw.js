@@ -6,38 +6,68 @@
   assets around. A service worker does that, and it matters most for the case
   this app is actually used in: revision on a bus with intermittent signal.
 
-  Two deliberate limitations:
+  Three deliberate limitations:
   - the cache is not updated in the background, because a stale question bank is
     worse than a slightly older one, and a versioned cache-first strategy with an
     explicit refresh keeps that visible;
-  - nothing is pre-cached beyond the shell, so the first offline load still needs
-    a visit while online.
+  - the shell is precached but the routes under it are not, so the first offline
+    visit to a screen still needs a trip online;
+  - nothing is precached from the 404 route, which is not an offline destination.
 */
 
-const CACHE = "specwise-v1";
+/*
+  The cache name carries a build id so that a deploy cannot be served from the
+  previous deploy's cache.
 
-const SHELL = ["/", "/plan/", "/practice/", "/chapters/", "/notebook/"];
+  This is the whole reason the string below is a placeholder. An unversioned name
+  means a returning learner keeps the old cache forever: the browser sees the
+  same cache name, the activate handler deletes nothing, and every precached
+  route is served from the previous version until a hard refresh happens to clear
+  it. Because the question bank is bundled into the JavaScript, that is a stale
+  and actively misleading question bank, not just a stale stylesheet.
+
+  The placeholder is replaced after `next build` by scripts/stamp-service-worker.ts.
+  When it has not been replaced - in development, or if the build step ever fails
+  to run - the fallback below still produces a fresh cache on every load, which
+  is wasteful but never stale.
+*/
+const CACHE = "specwise-__BUILD_ID__";
+
+/*
+  Every top-level route the static export produces. Leaving one out means that
+  screen is not available offline until the learner has opened it once while
+  online, which is exactly the moment they cannot be relied on to.
+*/
+const SHELL = [
+  "/",
+  "/plan/",
+  "/practice/",
+  "/test/",
+  "/chapters/",
+  "/notebook/",
+  "/review/",
+  "/stats/",
+];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches
       .open(CACHE)
-      .then((cache) => cache.addAll(SHELL))
-      .then(() => self.skipWaiting())
-      .catch(() => {
-        // A failed precache must not block installation: the app still works
-        // online and will cache as it is used.
-      }),
+      .then((cache) =>
+        // addAll is atomic: one 404 and the whole shell is rejected. The catch
+        // below handles that, so individual routes are optional here.
+        cache.addAll(SHELL).catch(() => undefined),
+      )
+      .then(() => self.skipWaiting()),
   );
 });
 
 self.addEventListener("activate", (event) => {
+  const keep = new Set([CACHE]);
   event.waitUntil(
     caches
       .keys()
-      .then((keys) =>
-        Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key))),
-      )
+      .then((keys) => Promise.all(keys.filter((key) => !keep.has(key)).map((key) => caches.delete(key))))
       .then(() => self.clients.claim()),
   );
 });
@@ -55,8 +85,12 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       fetch(request)
         .then((response) => {
-          const copy = response.clone();
-          caches.open(CACHE).then((cache) => cache.put(request, copy));
+          // Only a real page is worth keeping. Caching an error response would
+          // pin a transient failure to that route until the next deploy.
+          if (response.ok) {
+            const copy = response.clone();
+            caches.open(CACHE).then((cache) => cache.put(request, copy));
+          }
           return response;
         })
         .catch(() => caches.match(request).then((hit) => hit ?? caches.match("/"))),

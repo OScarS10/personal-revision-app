@@ -90,7 +90,7 @@ export function ChapterPicker({
       {visible.length === 0 ? (
         <p className="prose-note">No chapter matches “{search}”.</p>
       ) : (
-        <ul className="divide-y divide-line">
+        <ul className="divide-y divide-rule">
           {visible.map((chapter) => {
             const on = enabledSet.has(chapter.id);
             const m = mastery[chapter.id];

@@ -134,7 +134,7 @@ export function NotebookPage() {
           </div>
 
           {showGrouped ? (
-            <div className="panel divide-y divide-line">
+            <div className="panel divide-y divide-rule">
               {groups.map((group) => (
                 <div key={group.template} className="py-3">
                   <div className="flex flex-wrap items-baseline gap-2">
@@ -170,7 +170,7 @@ export function NotebookPage() {
               ))}
             </div>
           ) : (
-            <div className="panel divide-y divide-line">
+            <div className="panel divide-y divide-rule">
               {entries.map((entry) => (
                 <div
                   key={`${entry.questionId}-${entry.at}`}

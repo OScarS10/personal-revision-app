@@ -9,64 +9,53 @@
   (correct / incorrect / warning) so it always carries meaning.
 */
 
+/*
+  Light and dark palettes are expressed with light-dark() rather than a
+  prefers-color-scheme block. The pair resolves off `color-scheme`, which the
+  theme toggle sets explicitly on <html>:
+
+  - preference of light/dark -> JS sets color-scheme to that value
+  - preference of "system"   -> JS copies the OS preference
+  - JS blocked or failed     -> "light dark" defers to the OS, same as the
+                                media query this replaces
+
+  That means the manual override and the system preference come from one source,
+  so the toggle and the media query cannot drift apart.
+*/
 :root {
-  color-scheme: light;
+  color-scheme: light dark;
 
-  --paper: #f7f6f2;
-  --surface: #fffefa;
-  --surface-2: #f0eee8;
-  --surface-3: #e7e4dc;
+  --paper: light-dark(#f7f6f2, #15140f);
+  --surface: light-dark(#fffefa, #1d1c16);
+  --surface-2: light-dark(#f0eee8, #25241d);
+  --surface-3: light-dark(#e7e4dc, #2f2d25);
 
-  --ink: #17170f;
-  --ink-2: #55534a;
-  --ink-3: #8a877c;
+  /*
+    ink-3 is the muted tier, so the temptation is to push it lighter until it
+    stops competing with body copy. It was set to #8a877c / #7a766a, which is
+    3.3:1 on light paper and 3.8:1 on the dark surface - under the 4.5:1
+    minimum for the 11-12px hints and small-caps labels it is actually used at.
+    These values hold the same relative weight while passing at body sizes.
+  */
+  --ink: light-dark(#17170f, #ece9df);
+  --ink-2: light-dark(#55534a, #a8a498);
+  --ink-3: light-dark(#726f64, #979380);
 
-  --rule: #e3e0d7;
-  --rule-2: #cecabd;
+  --rule: light-dark(#e3e0d7, #302e26);
+  --rule-2: light-dark(#cecabd, #454238);
 
-  --accent: #1f4d7a;
-  --accent-2: #2c6a9e;
-  --accent-soft: #e7eef5;
+  --accent: light-dark(#1f4d7a, #85b3e0);
+  --accent-2: light-dark(#2c6a9e, #a3c8ec);
+  --accent-soft: light-dark(#e7eef5, #1a2531);
 
-  --ok: #2c6a45;
-  --ok-soft: #e4efe7;
-  --bad: #9e2b25;
-  --bad-soft: #f8e9e6;
-  --warn: #8a5a10;
-  --warn-soft: #f7f0e0;
+  --ok: light-dark(#2c6a45, #74c08f);
+  --ok-soft: light-dark(#e4efe7, #182a20);
+  --bad: light-dark(#9e2b25, #e2908a);
+  --bad-soft: light-dark(#f8e9e6, #2c1a18);
+  --warn: light-dark(#8a5a10, #d0a55c);
+  --warn-soft: light-dark(#f7f0e0, #2a2214);
 
-  --focus: #1f4d7a;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    color-scheme: dark;
-
-    --paper: #15140f;
-    --surface: #1d1c16;
-    --surface-2: #25241d;
-    --surface-3: #2f2d25;
-
-    --ink: #ece9df;
-    --ink-2: #a8a498;
-    --ink-3: #7a766a;
-
-    --rule: #302e26;
-    --rule-2: #454238;
-
-    --accent: #85b3e0;
-    --accent-2: #a3c8ec;
-    --accent-soft: #1a2531;
-
-    --ok: #74c08f;
-    --ok-soft: #182a20;
-    --bad: #e2908a;
-    --bad-soft: #2c1a18;
-    --warn: #d0a55c;
-    --warn-soft: #2a2214;
-
-    --focus: #85b3e0;
-  }
+  --focus: light-dark(#1f4d7a, #85b3e0);
 }
 
 @theme inline {
@@ -169,6 +158,9 @@ body {
 .prose-note {
   color: var(--ink-2);
   line-height: 1.6;
+  /* The 80rem container lets a note run to ~150 characters per line. Cap the
+     measure so notes stay readable without narrowing the page itself. */
+  max-width: 70ch;
 }
 
 mark {
@@ -277,10 +269,14 @@ mark {
   border-color: var(--ink-2);
 }
 
+/*
+  The accent flips from deep blue to pale blue between themes, so the label
+  colour has to flip with it. Fixed white is 1.9:1 against the dark-mode accent.
+*/
 .btn-accent {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: light-dark(#fff, #0d1a24);
 }
 .btn-accent:hover:not(:disabled) {
   background: var(--accent-2);
