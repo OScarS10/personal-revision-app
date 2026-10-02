@@ -24,14 +24,14 @@ import {
   to the configuration that produced it rather than resetting it.
 */
 
-const LENGTHS = [5, 10, 15, 25] as const;
+const LENGTHS = [5, 10, 15, 25, "infinite"] as const;
 
 export function PracticePage() {
   const router = useRouter();
   const params = useSearchParams();
   const { state, toggleChapter, setChapters, setDifficulty, recordAnswer, undoLastAnswer } = useStore();
 
-  const [length, setLength] = useState<number>(10);
+  const [length, setLength] = useState<number | "infinite">(10);
   const [search, setSearch] = useState("");
   const [running, setRunning] = useState(false);
 
@@ -129,17 +129,19 @@ export function PracticePage() {
 
   const start = useCallback(() => setRunning(true), []);
 
+  const mode = length === "infinite" ? "infinite" : "practice";
+
   if (running) {
     return (
       <SessionRunner
-        mode="practice"
+        mode={mode}
         chapters={chapters}
         enabledIds={enabled}
         state={state}
-        length={length}
+        length={length === "infinite" ? null : length}
         perQuestionSeconds={null}
-        title="Practice"
-        subtitle="Untimed, with feedback as you go."
+        title={mode === "infinite" ? "Infinite practice" : "Practice"}
+        subtitle={mode === "infinite" ? "No question limit. Keep going as long as you want." : "Untimed, with feedback as you go."}
         backHref="/practice"
         onRecordAnswer={recordAnswer}
         onExit={() => {
@@ -172,8 +174,11 @@ export function PracticePage() {
           <div>
             <span className="label">Questions</span>
             <Segmented
-              onChange={(v) => setLength(Number(v))}
-              options={LENGTHS.map((n) => ({ value: String(n), label: String(n) }))}
+              onChange={(v) => setLength(v === "infinite" ? "infinite" : Number(v))}
+              options={LENGTHS.map((n) => ({
+                value: String(n),
+                label: n === "infinite" ? "∞ Infinite" : String(n),
+              }))}
               value={String(length)}
             />
             <p className="prose-note mt-2">
@@ -223,7 +228,7 @@ export function PracticePage() {
           onClick={start}
           type="button"
         >
-          Start {length} questions
+          Start {length === "infinite" ? "∞ Infinite" : `${length} questions`}
         </button>
         {enabled.length === 0 ? (
           <span className="text-ink-2 text-[13px]">Select at least one chapter to begin.</span>

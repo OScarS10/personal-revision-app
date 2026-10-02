@@ -25,7 +25,7 @@ export interface SessionRunnerProps {
   chapters: Chapter[];
   enabledIds: string[];
   state: PersistedState;
-  length: number;
+  length: number | null;
   perQuestionSeconds: number | null;
   title: string;
   subtitle: string;
@@ -38,6 +38,7 @@ const MODE_LABEL: Record<SessionMode, string> = {
   practice: "Practice",
   test: "Mock test",
   review: "Review",
+  infinite: "Infinite practice",
 };
 
 export function SessionRunner(props: SessionRunnerProps) {

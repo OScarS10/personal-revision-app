@@ -341,7 +341,7 @@ export interface PersistedState {
   recentItemIds: string[];
   sessions: number;
   /** Rolling accuracy per ISO date for the streak chart. */
-  daily: Record<string, { attempted: number; correct: number }>;
+  daily: Record<string, { attempted: number; correct: number; durationMs?: number; sessions?: number }>;
   /** Exam dates per subject, as local midnight timestamps. */
   examDates: Partial<Record<SubjectId, number>>;
   /**

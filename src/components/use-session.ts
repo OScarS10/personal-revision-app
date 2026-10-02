@@ -68,7 +68,7 @@ export interface UseSessionOptions {
   enabledIds: string[];
   state: PersistedState;
   insights: SkillInsight[];
-  length: number;
+  length: number | null;
   /** Seconds per question, or null for untimed. */
   perQuestionSeconds: number | null;
   seed?: string;
@@ -182,7 +182,7 @@ export function useSession(options: UseSessionOptions): SessionApi {
         insights,
         state,
         mode,
-        length,
+        length: length ?? undefined,
         rng: seededRandom(`${seed}::plan`),
       }),
     // Rebuilt only when the session is (re)started.

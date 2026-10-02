@@ -245,8 +245,14 @@ function QuestionBody(props: QuestionViewProps) {
               {flagged ? "Bookmarked" : "Bookmark"}
             </button>
           ) : null}
-          {onUndo ? (
-            <button onClick={onUndo} disabled={!canUndo} className="btn btn-sm btn-ghost">
+{onUndo ? (
+            <button
+              onClick={onUndo}
+              disabled={!canUndo}
+              className="btn btn-sm btn-ghost"
+              type="button"
+              aria-label="Undo last answer"
+            >
               Undo
             </button>
           ) : null}
@@ -475,15 +481,15 @@ function QuestionBody(props: QuestionViewProps) {
 
       {/* -------------------------------------------------------- actions */}
       <div className="border-rule flex flex-wrap items-center gap-2 border-t pt-4">
-        {revealed ? (
-          <button onClick={onNext} className="btn btn-primary">
+{revealed ? (
+          <button onClick={onNext} className="btn btn-primary" type="button">
             {onFlag && flagged ? "Next question" : "Next question"}
             <span className="kbd ml-1 border-current/25 bg-transparent">Enter</span>
           </button>
         ) : (
           <>
             {typed ? (
-              <button onClick={submit} disabled={!canSubmit} className="btn btn-primary">
+              <button onClick={submit} disabled={!canSubmit} className="btn btn-primary" type="button">
                 Check answer
                 <span className="kbd ml-1 border-current/25 bg-transparent">Enter</span>
               </button>
@@ -493,15 +499,16 @@ function QuestionBody(props: QuestionViewProps) {
                 onClick={submit}
                 disabled={selected.length === 0}
                 className={typed ? "btn" : "btn btn-primary"}
+                type="button"
               >
                 Check answer
               </button>
             ) : null}
-            <button onClick={onReveal} className="btn btn-ghost">
+            <button onClick={onReveal} className="btn btn-ghost" type="button">
               Show answer
               <span className="kbd ml-1">?</span>
             </button>
-            <button onClick={onSkip} className="btn btn-ghost">
+            <button onClick={onSkip} className="btn btn-ghost" type="button">
               Skip
             </button>
           </>

@@ -27,7 +27,7 @@ import { confidenceOf, getSkillState } from "@/lib/model";
   between sessions.
 */
 
-export type SessionMode = "practice" | "test" | "review";
+export type SessionMode = "practice" | "test" | "review" | "infinite";
 
 export interface SessionPlan {
   /** Chapter ids in the order they will be drawn from. */
@@ -55,6 +55,7 @@ export const SESSION_LENGTHS: Record<SessionMode, number[]> = {
   practice: [5, 10, 15, 20, 30],
   test: [10, 20, 25, 30],
   review: [10, 20, 30, 40],
+  infinite: [10, 20, 30, 50, 100],
 };
 
 /** Seconds per question, roughly the real exam rate for a 1-mark item. */
@@ -121,41 +122,72 @@ export function planSession(options: PlanOptions): SessionPlan {
 
   const length =
     options.length ??
-    (mode === "test" ? 20 : mode === "review" ? 15 : 10);
+    (mode === "infinite"
+      ? null
+      : mode === "test"
+      ? 20
+      : mode === "review"
+      ? 15
+      : 10);
 
   if (pool.length === 0) {
     return { queue: [], mode, length, perQuestionSeconds: null };
   }
 
-  // Weighted draw without replacement, so every chosen chapter is distinct
-  // until we run out - a session should not ask the same topic five times.
-  const remaining = pool.map((chapter) => ({
-    chapter,
-    weight: chapterWeight(chapter, byId.get(chapter.id), state, now),
-  }));
+  // For infinite mode, build a much larger queue that cycles through chapters
+  // For finite modes, use the traditional logic
+  const target = mode === "infinite"
+    ? pool.length * 20  // Large queue for cycling
+    : Math.min(length ?? 10, pool.length * 3);
+
   const queue: string[] = [];
 
-  const target = Math.min(length, pool.length * 3);
-  while (queue.length < target && remaining.length > 0) {
-    const total = remaining.reduce((s, r) => s + r.weight, 0);
-    if (total <= 0) break;
-    let roll = rng() * total;
-    let index = 0;
-    while (index < remaining.length - 1 && roll > remaining[index].weight) {
-      roll -= remaining[index].weight;
-      index++;
-    }
-    queue.push(remaining[index].chapter.id);
-    remaining.splice(index, 1);
+  if (mode === "infinite") {
+    // Infinite mode: build a large cycling queue with weighted selection with replacement
+    // This creates a queue that cycles through all chapters proportionally to their weights
+    const weights = pool.map((chapter) => ({
+      chapter,
+      weight: chapterWeight(chapter, byId.get(chapter.id), state, now),
+    }));
+    const totalWeight = weights.reduce((s, w) => s + w.weight, 0);
 
-    // Every enabled chapter has now had a turn. Keep going with a second pass
-    // so longer sessions broaden rather than repeat the first pick.
-    if (remaining.length === 0) {
-      for (const entry of pool) {
-        queue.push(entry.id);
-        if (queue.length >= target) break;
+    while (queue.length < target) {
+      let roll = rng() * totalWeight;
+      let index = 0;
+      while (index < weights.length - 1 && roll > weights[index].weight) {
+        roll -= weights[index].weight;
+        index++;
       }
-      break;
+      queue.push(weights[index].chapter.id);
+    }
+  } else {
+    // Finite modes: weighted draw without replacement
+    const remaining = pool.map((chapter) => ({
+      chapter,
+      weight: chapterWeight(chapter, byId.get(chapter.id), state, now),
+    }));
+
+    while (queue.length < target && remaining.length > 0) {
+      const total = remaining.reduce((s, r) => s + r.weight, 0);
+      if (total <= 0) break;
+      let roll = rng() * total;
+      let index = 0;
+      while (index < remaining.length - 1 && roll > remaining[index].weight) {
+        roll -= remaining[index].weight;
+        index++;
+      }
+      queue.push(remaining[index].chapter.id);
+      remaining.splice(index, 1);
+
+      // Every enabled chapter has now had a turn. Keep going with a second pass
+      // so longer sessions broaden rather than repeat the first pick.
+      if (remaining.length === 0) {
+        for (const entry of pool) {
+          queue.push(entry.id);
+          if (queue.length >= target) break;
+        }
+        break;
+      }
     }
   }
 
@@ -163,7 +195,7 @@ export function planSession(options: PlanOptions): SessionPlan {
     queue,
     mode,
     length,
-    perQuestionSeconds: mode === "test" ? 90 : null,
+    perQuestionSeconds: mode === "test" ? 90 : mode === "infinite" ? null : null,
   };
 }
 

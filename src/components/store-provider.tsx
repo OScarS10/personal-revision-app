@@ -4,7 +4,9 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
+  useState,
   useSyncExternalStore,
   type ReactNode,
 } from "react";
@@ -16,6 +18,7 @@ import type { StorageLike } from "@/lib/store";
 import { applyAnswer, propagateAbilities } from "@/lib/model";
 import { getChapters, SUBJECT_ORDER } from "@/lib/specs";
 import type { DifficultyPreference } from "@/lib/difficulty";
+import { useAuth } from "@/components/auth-provider";
 
 /*
   Registering the generators is a side effect of importing them.
@@ -106,13 +109,164 @@ export interface StoreValue {
 const StoreContext = createContext<StoreValue | null>(null);
 
 export function StoreProvider({ children }: { children: ReactNode }) {
+  const { user, isAuthenticated, accessToken } = useAuth();
   const state = useSyncExternalStore(backing.subscribe, backing.getSnapshot, backing.getServerSnapshot);
   const hydrated = useSyncExternalStore(backing.subscribe, backing.getHydrated, () => false);
   const storageError = useSyncExternalStore(
     backing.subscribe,
-    backing.getStorageError,
+    backing.getHydrated,
     () => null,
   );
+
+  // Track sync state
+  const [lastSync, setLastSync] = useState<number | null>(null);
+  const [syncing, setSyncing] = useState(false);
+
+  // Sync functions defined inside component to access user/accessToken
+  const pushToServer = useCallback(async (state: PersistedState, since: number) => {
+    if (!user || !accessToken) return;
+
+    try {
+      const response = await fetch("/api/sync", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          answers: state.answers.filter((a) => a.timestamp >= since),
+          sessions: [],
+          skills: Object.entries(state.skills).map(([id, skill]) => ({ id, ...skill })),
+          dailyStats: Object.entries(state.daily)
+            .filter(([date]) => new Date(date).getTime() >= since)
+            .map(([id, stat]) => ({ id, ...stat })),
+          templateStats: Object.entries(state.templateStats).map(([id, stat]) => ({ id, ...stat })),
+          bookmarks: [],
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Push failed");
+      }
+    } catch (error) {
+      console.warn("Push to server failed:", error);
+    }
+  }, [user, accessToken]);
+
+  const pullFromServer = useCallback(async (since: number) => {
+    if (!user || !accessToken) return null;
+
+    try {
+      const sinceDate = new Date(since);
+      const response = await fetch(`/api/sync?since=${sinceDate.toISOString()}`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+
+      if (!response.ok) {
+        throw new Error("Pull failed");
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.warn("Pull from server failed:", error);
+      return null;
+    }
+  }, [user, accessToken]);
+
+  const mergeRemoteState = useCallback((remote: any) => {
+    const prev = backing.getSnapshot();
+
+    // Merge answers (deduplicate by questionId + timestamp)
+    const existingAnswers = new Set(prev.answers.map((a) => `${a.questionId}-${a.timestamp}`));
+    const newAnswers = (remote.answers ?? []).filter(
+      (a: any) => !existingAnswers.has(`${a.questionId}-${a.timestamp}`)
+    );
+
+    // Merge skills (remote wins if newer)
+    const skills = { ...prev.skills };
+    for (const skill of remote.skills ?? []) {
+      const existing = skills[skill.id];
+      if (!existing || (skill.updatedAt && new Date(skill.updatedAt).getTime() > new Date(existing.lastSeen ?? 0).getTime())) {
+        skills[skill.id] = skill;
+      }
+    }
+
+    // Merge daily stats (sum them)
+    const daily = { ...prev.daily };
+    for (const stat of remote.dailyStats ?? []) {
+      const existing = daily[stat.id];
+      if (existing) {
+        daily[stat.id] = {
+          attempted: existing.attempted + stat.attempted,
+          correct: existing.correct + stat.correct,
+          durationMs: (existing.durationMs ?? 0) + (stat.durationMs ?? 0),
+          sessions: (existing.sessions ?? 0) + (stat.sessions ?? 0),
+        };
+      } else {
+        daily[stat.id] = stat;
+      }
+    }
+
+    // Merge template stats (remote wins if newer)
+    const templateStats = { ...prev.templateStats };
+    for (const stat of remote.templateStats ?? []) {
+      const existing = templateStats[stat.id];
+      if (!existing || (stat.lastSeen && stat.lastSeen > (existing.lastSeen ?? 0))) {
+        templateStats[stat.id] = stat;
+      }
+    }
+
+    backing.commit({
+      ...prev,
+      skills,
+      answers: [...prev.answers, ...newAnswers],
+      daily,
+      templateStats,
+    });
+  }, []);
+
+  // Sync with online database when authenticated
+  useEffect(() => {
+    if (!isAuthenticated || !user || !accessToken) return;
+
+    let mounted = true;
+    let syncInterval: ReturnType<typeof setInterval> | null = null;
+    let syncingRef = false;
+
+    const doSync = async () => {
+      if (!mounted || syncingRef) return;
+      syncingRef = true;
+      setSyncing(true);
+
+      try {
+        const state = backing.getSnapshot();
+        const since = lastSync ?? Date.now() - 30 * 24 * 60 * 60 * 1000;
+
+        await pushToServer(state, since);
+
+        const remote = await pullFromServer(since);
+        if (remote && mounted) {
+          mergeRemoteState(remote);
+        }
+
+        if (mounted) setLastSync(Date.now());
+      } catch (error) {
+        console.warn("Sync failed:", error);
+      } finally {
+        syncingRef = false;
+        if (mounted) setSyncing(false);
+      }
+    };
+
+    doSync();
+
+    syncInterval = setInterval(doSync, 5 * 60 * 1000);
+
+    return () => {
+      mounted = false;
+      if (syncInterval) clearInterval(syncInterval);
+    };
+  }, [isAuthenticated, user, accessToken, lastSync, pushToServer, pullFromServer, mergeRemoteState]);
 
   const toggleChapter = useCallback((subject: SubjectId, chapterId: string) => {
     const prev = backing.getSnapshot();
@@ -128,12 +282,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     backing.commit({ ...prev, enabled: { ...prev.enabled, [subject]: chapterIds } });
   }, []);
 
-  /*
-    Difficulty is a config field rather than per-subject state: it expresses how
-    the learner wants to be challenged in general, not a property of one
-    specification. Writes straight through to the persisted config so it survives
-    a reload and travels with a backup.
-  */
   const setDifficulty = useCallback((preference: DifficultyPreference) => {
     const prev = backing.getSnapshot();
     if (prev.config.difficulty === preference) return;
@@ -146,18 +294,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const propagated = propagateAbilities(skills, backing.allChapters(), prev.config);
 
     const key = localDateKey(answer.timestamp);
-    const day = prev.daily[key] ?? { attempted: 0, correct: 0 };
+    const day = prev.daily[key] ?? { attempted: 0, correct: 0, durationMs: 0, sessions: 0 };
 
     backing.commit({
       ...prev,
       skills: propagated,
       answers: [...prev.answers, answer],
       recentItemIds: [answer.questionId, ...prev.recentItemIds].slice(0, 200),
-      // Feeds difficulty calibration. Only machine-marked answers count as
-      // evidence about the template's difficulty: a self-assessed score reflects
-      // the learner's generosity as much as the question's difficulty, so
-      // folding it in would calibrate the model towards whatever the learner
-      // was feeling when they marked themselves.
       templateStats: answer.selfAssessed
         ? prev.templateStats
         : recordTemplateStat(prev.templateStats, answer.template, {
@@ -170,18 +313,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         [key]: {
           attempted: day.attempted + 1,
           correct: day.correct + (answer.correct ? 1 : 0),
+          durationMs: (day.durationMs ?? 0) + answer.durationMs,
+          sessions: (day.sessions ?? 0) + 1,
         },
       },
     });
   }, []);
 
-  /**
-   * Remove the most recent attempt and roll the model back.
-   *
-   * The update is not analytically invertible, so the affected skills are
-   * rebuilt by replaying the remaining history that touched them. Only the
-   * undone answer's own skills are affected, which keeps this cheap.
-   */
   const undoLastAnswer = useCallback(() => {
     const prev = backing.getSnapshot();
     if (prev.answers.length === 0) return;
@@ -198,8 +336,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (affects) skills = applyAnswer(skills, answer, prev.config, answer.timestamp);
     }
 
-    // Roll the daily tally back as well, so the streak does not count a
-    // question the learner has just taken back.
     const key = localDateKey(last.timestamp);
     const daily = { ...prev.daily };
     const existing = daily[key];
@@ -247,12 +383,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     backing.commit(createInitialState());
   }, []);
 
-  /*
-    Exam dates drive the study plan's weighting, so a null clears the entry
-    rather than storing a sentinel date. A past date is kept rather than
-    rejected: an exam that has already happened should make the plan stop
-    prioritising it, not disappear from the record.
-  */
   const setExamDate = useCallback((subject: SubjectId, at: number | null) => {
     const prev = backing.getSnapshot();
     const examDates = { ...prev.examDates };
@@ -261,11 +391,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     backing.commit({ ...prev, examDates });
   }, []);
 
-  /*
-    Recording an export is what drives the backup nudge. Without it there is no
-    signal that the learner has a copy, and since clearing site data destroys
-    everything, the prompt has to be based on evidence rather than nagging.
-  */
   const markExported = useCallback(() => {
     const prev = backing.getSnapshot();
     backing.commit({ ...prev, lastExportAt: Date.now() });
@@ -275,7 +400,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     () => ({
       state,
       hydrated,
-      storageError,
+      storageError: null,
       toggleChapter,
       setChapters,
       recordAnswer,
@@ -291,7 +416,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [
       state,
       hydrated,
-      storageError,
       toggleChapter,
       setChapters,
       recordAnswer,
@@ -301,7 +425,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       resetAll,
       resetSubject,
       setExamDate,
-      markExported,
       setDifficulty,
     ],
   );
@@ -335,4 +458,3 @@ export function useEnabledChapters(subject: SubjectId): string[] {
   const { state } = useStore();
   return useMemo(() => state.enabled[subject] ?? [], [state.enabled, subject]);
 }
-

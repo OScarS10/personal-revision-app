@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useMemo, useState, type ReactNode } from "react";
 import { StoreProvider, useStore } from "@/components/store-provider";
+import { AuthProvider, useAuth } from "@/components/auth-provider";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { SUBJECTS, SUBJECT_ORDER } from "@/lib/specs";
 import { buildReviewQueue, summariseReview } from "@/lib/spaced";
@@ -169,9 +170,11 @@ function Shell({ children }: { children: ReactNode }) {
 
 export function AppProviders({ children }: { children: ReactNode }) {
   return (
-    <StoreProvider>
-      <Shell>{children}</Shell>
-    </StoreProvider>
+    <AuthProvider>
+      <StoreProvider>
+        <Shell>{children}</Shell>
+      </StoreProvider>
+    </AuthProvider>
   );
 }
 

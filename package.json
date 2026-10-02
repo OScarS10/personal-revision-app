@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build && tsx scripts/stamp-service-worker.ts",
-    "start": "tsx scripts/serve-static.ts",
+    "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "smoke": "tsx scripts/smoke-generators.ts",
@@ -16,14 +16,21 @@
     "report:selector": "tsx scripts/report-selector.ts",
     "check:browser": "tsx scripts/check-browser.ts",
     "check:layout": "tsx scripts/audit-layout.ts",
-    "preview": "npm run build && tsx scripts/serve-static.ts"
+    "preview": "npm run build && tsx scripts/serve-static.ts",
+    "db:migrate": "tsx scripts/migrate.ts"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.104.1",
     "@types/katex": "^0.16.8",
+    "@vercel/postgres": "^0.10.0",
+    "bcryptjs": "^3.0.3",
+    "dexie": "^4.4.6",
+    "jose": "^6.2.12",
     "katex": "^0.18.10",
     "next": "16.3.8",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
