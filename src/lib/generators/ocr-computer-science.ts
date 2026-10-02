@@ -127,8 +127,16 @@ const representationGenerators: Generator[] = [
     span: 1.6,
     build: ({ rng }) => {
       const value = rng.int(5, 90);
-      const bits = Math.max(4, Math.ceil(Math.log2(value + 1)));
-      const unsigned = value + Math.pow(2, bits);
+      /*
+        Two's complement needs one bit more than the unsigned magnitude: -value
+        only fits once value <= 2^(bits-1). Using ceil(log2(value + 1)) sizes
+        the field for the magnitude instead, which is a bit short.
+      */
+      const bits = Math.max(4, Math.ceil(Math.log2(value)) + 1);
+      // The stored pattern is 2^bits - value, so reading it back as
+      // (pattern - 2^bits) returns -value. Adding value to 2^bits instead
+      // produces the pattern for a different number entirely.
+      const unsigned = Math.pow(2, bits) - value;
       const binary = unsigned.toString(2).padStart(bits, "0");
 
       return numericQuestion(
