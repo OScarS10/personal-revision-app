@@ -4,7 +4,12 @@ import { query, queryOne } from "@/lib/db/client";
 import { z } from "zod";
 
 const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET || "dev-secret-change-in-production-min-32-chars-long!!"
+  process.env.JWT_SECRET ?? (() => {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("JWT_SECRET environment variable is required in production");
+    }
+    return "dev-secret-change-in-production-min-32-chars-long!!";
+  })()
 );
 
 const ACCESS_TOKEN_EXPIRY = "15m";
@@ -117,38 +122,34 @@ export async function verifyAccessToken(token: string): Promise<SessionUser | nu
  * Verify a refresh token and rotate it
  */
 export async function verifyAndRotateRefreshToken(token: string, userAgent?: string, ipAddress?: string): Promise<{ accessToken: string; refreshToken: string; user: SessionUser } | null> {
-  // Find session by token hash
-  const sessions = await query<{ id: string; user_id: string; token_hash: string; expires_at: string; revoked_at: string | null }>`
+  const { createHash } = await import("node:crypto");
+  const tokenHash = createHash("sha256").update(token).digest("hex");
+
+  const session = await queryOne<{ id: string; user_id: string; token_hash: string; expires_at: string; revoked_at: string | null }>`
     SELECT id, user_id, token_hash, expires_at, revoked_at
     FROM user_sessions
-    WHERE revoked_at IS NULL AND expires_at > NOW()
+    WHERE token_hash = ${tokenHash} AND revoked_at IS NULL AND expires_at > NOW()
   `;
 
-  for (const session of sessions.data ?? []) {
-    const valid = await verifyPassword(token, session.token_hash);
-    if (valid) {
-      // Token is valid - revoke old and create new
-      await query`UPDATE user_sessions SET revoked_at = NOW() WHERE id = ${session.id}`;
+  if (!session.data) return null;
 
-      const newRefreshToken = await createRefreshToken(session.user_id);
-      const newAccessToken = await createAccessToken({ id: session.user_id, email: "", name: null });
+  await query`UPDATE user_sessions SET revoked_at = NOW() WHERE id = ${session.data.id}`;
 
-      // Get user info
-      const user = await queryOne<{ id: string; email: string; name: string | null }>`
-        SELECT id, email, name FROM users WHERE id = ${session.user_id}
-      `;
+  const newRefreshToken = await createRefreshToken(session.data.user_id);
 
-      if (!user.data) return null;
+  const user = await queryOne<{ id: string; email: string; name: string | null }>`
+    SELECT id, email, name FROM users WHERE id = ${session.data.user_id}
+  `;
 
-      return {
-        accessToken: newAccessToken,
-        refreshToken: newRefreshToken,
-        user: { id: user.data.id, email: user.data.email, name: user.data.name },
-      };
-    }
-  }
+  if (!user.data) return null;
 
-  return null;
+  const newAccessToken = await createAccessToken({ id: user.data.id, email: user.data.email, name: user.data.name });
+
+  return {
+    accessToken: newAccessToken,
+    refreshToken: newRefreshToken,
+    user: { id: user.data.id, email: user.data.email, name: user.data.name },
+  };
 }
 
 /**
@@ -259,9 +260,6 @@ export async function requestPasswordReset(input: { email: string }): Promise<{ 
     WHERE id = ${user.data.id}
   `;
 
-  // TODO: Send email with reset link
-  console.log(`Password reset token for ${email}: ${resetToken}`);
-
   return { success: true };
 }
 
@@ -323,30 +321,6 @@ export async function getUserById(userId: string): Promise<User | null> {
  * Update user profile
  */
 export async function updateUserProfile(userId: string, updates: { name?: string; avatar_url?: string }): Promise<User | null> {
-  const fields: string[] = [];
-  const values: any[] = [];
-
-  if (updates.name !== undefined) {
-    fields.push("name = " + values.length);
-    values.push(updates.name);
-  }
-  if (updates.avatar_url !== undefined) {
-    fields.push("avatar_url = " + values.length);
-    values.push(updates.avatar_url);
-  }
-
-  if (fields.length === 0) {
-    const user = await getUserById(userId);
-    return user;
-  }
-
-  fields.push("updated_at = NOW()");
-
-  // Note: This is a simplified approach. In production, use proper parameterized queries.
-  const query_str = `UPDATE users SET ${fields.join(", ")} WHERE id = $1 RETURNING id, email, name, avatar_url, created_at, updated_at, email_verified`;
-  // For simplicity, we'll use the template literal approach
-  // In production, use proper parameter binding
-
   const result = await queryOne<{
     id: string;
     email: string;

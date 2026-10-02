@@ -6,12 +6,16 @@ export async function POST(request: NextRequest) {
     const authHeader = request.headers.get("authorization");
     const token = authHeader?.replace("Bearer ", "");
 
-    if (token) {
-      const user = await verifyAccessToken(token);
-      if (user) {
-        await revokeAllSessions(user.id);
-      }
+    if (!token) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    const user = await verifyAccessToken(token);
+    if (!user) {
+      return NextResponse.json({ error: "Invalid token" }, { status: 401 });
+    }
+
+    await revokeAllSessions(user.id);
 
     const response = NextResponse.json({ success: true });
     response.cookies.delete("refreshToken");

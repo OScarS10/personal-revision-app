@@ -12,7 +12,7 @@ export async function POST(request: NextRequest) {
     const userAgent = request.headers.get("user-agent") ?? undefined;
     const ipAddress = request.headers.get("x-forwarded-for") ?? undefined;
 
-    const result = await verifyAndRotateRefreshToken(refreshToken, userAgent, undefined);
+    const result = await verifyAndRotateRefreshToken(refreshToken, userAgent, ipAddress);
 
     if (!result) {
       const response = NextResponse.json({ error: "Invalid refresh token" }, { status: 401 });

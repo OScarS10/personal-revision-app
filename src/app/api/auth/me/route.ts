@@ -7,7 +7,7 @@ export async function GET(request: NextRequest) {
     const token = authHeader?.replace("Bearer ", "");
 
     if (!token) {
-      return NextResponse.json({ user: null });
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const sessionUser = await verifyAccessToken(token);
