@@ -30,8 +30,12 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files
 .env*
+# The template is the one env file that belongs in the repo: it records which
+# variables the app reads and what they need to be, which is the only way anyone
+# cloning this knows what to set on a fresh host. It holds no real values.
+!.env.example
 
 # vercel
 .vercel
@@ -39,8 +43,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
-
-.vercel
 
 # Externally sourced marking data and raw scrapes. Licensed material never goes in.
 .cache/

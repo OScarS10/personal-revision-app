@@ -9,7 +9,7 @@ import type {
   SubjectId,
 } from "@/lib/types";
 import { clamp, logistic } from "@/lib/math-utils";
-import { BOUNDARIES, type GradeBands } from "@/lib/grades";
+import { gradeCuts } from "@/lib/grades";
 import {
   confidenceOf,
   inferPriorTheta,
@@ -23,7 +23,10 @@ import {
   This used to be one hardcoded table applied to every subject: A* at 0.87, A at
   0.80, B at 0.70, then 0.58 / 0.47 / 0.37. That spacing matches no board - it was
   a guess, and it was silently presented as a grade. The bands now come from
-  `grades.ts`, which holds each qualification's own boundaries.
+  `grades.ts`, which holds each qualification's own published boundaries. The
+  fractions are derived there from the boards' confirmed raw marks rather than
+  stored here, so the table on the stats page and the probabilities computed
+  here cannot drift apart.
  *
   The mapping stays approximate, and has to: weighted mastery is a 0..1 estimate of
   coverage, not a raw mark. The letter is therefore an estimate off the real
@@ -31,10 +34,7 @@ import {
   see the numbers rather than only the letter.
 */
 function gradeCutsFor(subject: SubjectId): Array<{ grade: string; cut: number }> {
-  return (Object.keys(BOUNDARIES[subject].bands) as Array<keyof GradeBands>).map((grade) => ({
-    grade,
-    cut: BOUNDARIES[subject].bands[grade],
-  }));
+  return gradeCuts(subject).map(({ grade, cut }) => ({ grade, cut }));
 }
 
 /** Standard normal CDF via the Abramowitz-Stegun erf approximation. */

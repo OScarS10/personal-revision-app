@@ -202,6 +202,10 @@ export function StatsPage() {
               <p className="prose-note mt-3">
                 Your {totalMarks}-mark total is projected at {projectedMarks} from mastery. {boundarySource}
               </p>
+              <p className="prose-note mt-2">
+                {BOUNDARIES[profile.subject].publishedBy} {BOUNDARIES[profile.subject].series}. Boards
+                reset these every series, so a later year&apos;s table will differ.
+              </p>
             </div>
           </div>
         </div>

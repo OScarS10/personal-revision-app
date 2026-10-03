@@ -22,6 +22,7 @@ import {
   gradeFor,
   marksRemaining,
   marksToNextGrade,
+  paperBands,
   paperMarks,
   rawToPercent,
 } from "@/lib/grades";
@@ -52,9 +53,9 @@ const ECON = "aqa-economics" as const;
 describe("grade boundaries", () => {
   it("awards the grade a mark actually reaches", () => {
     const spec = BOUNDARIES[ECON];
-    const aStar = boundaryMark(spec.totalMarks, spec.bands, "A*");
-    const a = boundaryMark(spec.totalMarks, spec.bands, "A");
-    const b = boundaryMark(spec.totalMarks, spec.bands, "B");
+    const aStar = boundaryMark(spec.bands, "A*");
+    const a = boundaryMark(spec.bands, "A");
+    const b = boundaryMark(spec.bands, "B");
 
     assert.equal(gradeFor(ECON, aStar), "A*");
     assert.equal(gradeFor(ECON, aStar - 1), "A");
@@ -64,7 +65,7 @@ describe("grade boundaries", () => {
   });
 
   it("is unclassified below the lowest band", () => {
-    const e = boundaryMark(BOUNDARIES[ECON].totalMarks, BOUNDARIES[ECON].bands, "E");
+    const e = boundaryMark(BOUNDARIES[ECON].bands, "E");
     assert.equal(gradeFor(ECON, e), "E");
     assert.equal(gradeFor(ECON, e - 1), "U");
     assert.equal(gradeFor(ECON, 0), "U");
@@ -96,22 +97,42 @@ describe("grade boundaries", () => {
     }
   });
 
-  it("keeps the synoptic essay bands above the exam papers", () => {
-    // Paper 3 is 20 marks and decides the grade, so it must not be marked on the
-    // same generous scale as an 80-mark paper of definitions.
+  it("keeps the synoptic paper's bands distinct from the exam papers'", () => {
+    /*
+      This test used to assert the opposite of what the board publishes.
+
+      AQA's June 2026 notional figures put Paper 3's A* at 58 of 80 (72.5%) against
+      Paper 1's 62 of 80 (77.5%), while its E is *higher* proportionally: 25 of 80
+      (31.25%) against Paper 1's 21 of 80 (26.25%). So the synoptic paper is not
+      uniformly harder - it is harder to scrape a bare pass on and easier to reach
+      the top on. The earlier version of this file described Paper 3 as a 20-mark
+      essay needing "real evaluation, not 16/20" and asserted its bands sat above
+      Paper 1's throughout. Both claims came from the invented table.
+    */
     const essay = BOUNDARIES[ECON].papers.find((p) => p.code === "7136/3")!;
     const paper1 = BOUNDARIES[ECON].papers.find((p) => p.code === "7136/1")!;
-    assert.ok(essay.bands["A*"] > paper1.bands["A*"]);
-    assert.ok(essay.bands.E < paper1.bands.E);
+    assert.ok(essay.bands, "7136/3 has published component boundaries");
+    assert.ok(paper1.bands, "7136/1 has published component boundaries");
+    assert.ok(
+      essay.bands!["A*"] / essay.marks < paper1.bands!["A*"] / paper1.marks,
+      "7136/3 should reach A* at a lower proportion than 7136/1",
+    );
+    assert.ok(
+      essay.bands!.E / essay.marks > paper1.bands!.E / paper1.marks,
+      "7136/3 should need a higher proportion for a bare E than 7136/1",
+    );
   });
 
   it("grades a single paper on that paper's own bands", () => {
-    // The essay's bands are deliberately stricter: 15/20 (0.75) is an A there,
-    // while 15 of an 80-mark paper is 0.19 and nowhere near the E threshold of 24.
-    // Reading a paper mark against the qualification total would badly mislead.
-    assert.equal(gradeFor(ECON, 15, "7136/3"), "A");
-    assert.equal(gradeFor(ECON, 14, "7136/3"), "B");
-    assert.equal(gradeFor(ECON, 14, "7136/1"), "U");
+    /*
+      24 of 80 is an E on Paper 1 (E at 21) and unclassified on Paper 3 (E at 25).
+      Reading a single paper's mark against another paper's thresholds - or against
+      the 240-mark overall - reports a grade the candidate cannot be given.
+    */
+    assert.equal(gradeFor(ECON, 24, "7136/1"), "E");
+    assert.equal(gradeFor(ECON, 24, "7136/3"), "U");
+    assert.equal(gradeFor(ECON, 49, "7136/3"), "A");
+    assert.equal(gradeFor(ECON, 48, "7136/3"), "B");
   });
 
   it("reports bands as contiguous, non-overlapping ranges", () => {
@@ -150,7 +171,7 @@ describe("grade boundaries", () => {
       assert.equal(e.grade, "E");
       assert.equal(
         e.from,
-        boundaryMark(BOUNDARIES[subject].totalMarks, BOUNDARIES[subject].bands, "E"),
+        boundaryMark(BOUNDARIES[subject].bands, "E"),
       );
       assert.equal(gradeFor(subject, e.from - 1), "U");
     }
@@ -159,10 +180,11 @@ describe("grade boundaries", () => {
   it("counts down the marks needed to the next grade", () => {
     const total = BOUNDARIES[ECON].totalMarks;
     const bands = BOUNDARIES[ECON].bands;
-    const b = boundaryMark(total, bands, "B");
+    const b = boundaryMark(bands, "B");
 
-    // 98 of 180. The useful answer is "10 more marks for a B", not "46 more marks
-    // for an A*", so this has to return the nearest grade above the score.
+    // Ten marks short of a B. The useful answer is "10 more marks for a B", not
+    // "46 more marks for an A*", so this has to return the nearest grade above
+    // the score.
     const next = marksToNextGrade(ECON, b - 10);
     assert.ok(next);
     assert.equal(next.grade, "B");
@@ -171,14 +193,14 @@ describe("grade boundaries", () => {
 
     // Exactly on a boundary, the grade below is already held, so the target moves up.
     assert.equal(marksToNextGrade(ECON, b)!.grade, "A");
-    assert.equal(marksToNextGrade(ECON, b)!.marksNeeded, boundaryMark(total, bands, "A") - b);
+    assert.equal(marksToNextGrade(ECON, b)!.marksNeeded, boundaryMark(bands, "A") - b);
 
     // Just under the E threshold there is still a next grade to chase.
-    const e = boundaryMark(total, bands, "E");
+    const e = boundaryMark(bands, "E");
     assert.equal(marksToNextGrade(ECON, e - 1)!.grade, "E");
     assert.equal(marksToNextGrade(ECON, e - 1)!.marksNeeded, 1);
 
-    assert.equal(marksToNextGrade(ECON, boundaryMark(total, bands, "A*")), null);
+    assert.equal(marksToNextGrade(ECON, boundaryMark(bands, "A*")), null);
   });
 
   it("lists every grade against its whole-mark threshold", () => {
@@ -198,8 +220,74 @@ describe("grade boundaries", () => {
 
   it("clamps the percentage it shows next to a score", () => {
     assert.equal(rawToPercent(ECON, 0), 0);
-    assert.equal(rawToPercent(ECON, 90), 50);
+    assert.equal(rawToPercent(ECON, 120), 50);
     assert.equal(rawToPercent(ECON, 10_000), 100);
+  });
+
+  it("uses the boards' published June 2026 figures, not fractions of a total", () => {
+    /*
+      Pinned against the source PDFs rather than derived, so a refactor cannot
+      quietly reintroduce a lossy fraction. Each expected value below is the mark
+      a candidate is actually graded against for the overall (subject) boundary.
+    */
+    assert.equal(BOUNDARIES[ECON].totalMarks, 240);
+    assert.deepEqual(BOUNDARIES[ECON].bands, { "A*": 178, A: 154, B: 132, C: 110, D: 88, E: 66 });
+    assert.deepEqual(BOUNDARIES["ocr-computer-science"].bands, {
+      "A*": 289,
+      A: 254,
+      B: 216,
+      C: 178,
+      D: 141,
+      E: 104,
+    });
+    assert.deepEqual(BOUNDARIES["edexcel-mathematics"].bands, {
+      "A*": 254,
+      A: 210,
+      B: 173,
+      C: 136,
+      D: 100,
+      E: 64,
+    });
+
+    // Every subject's boundaries are a confirmed figure, not a derived one.
+    for (const subject of SUBJECT_ORDER) {
+      assert.equal(BOUNDARIES[subject].basis, "confirmed", `${subject} is not a confirmed boundary`);
+      assert.ok(BOUNDARIES[subject].series, `${subject} does not name its exam series`);
+      assert.ok(BOUNDARIES[subject].sourceUrl, `${subject} does not cite a source`);
+    }
+
+    /*
+      Whole marks throughout. A fractional boundary means someone reintroduced a
+      fraction, which is what cost the C band a mark at 110/240 before.
+    */
+    for (const subject of SUBJECT_ORDER) {
+      for (const mark of Object.values(BOUNDARIES[subject].bands)) {
+        assert.ok(Number.isInteger(mark), `${subject} has a fractional boundary: ${mark}`);
+      }
+    }
+  });
+
+  it("scales the one qualification with no published per-paper boundaries", () => {
+    /*
+      Pearson publish only the overall figure for 9MA0, so its papers carry no
+      bands of their own. `paperBands` derives them pro rata; the point of the
+      test is that this is flagged as indicative rather than presented as
+      published, and that the pro-rata figures stay inside the paper's maximum.
+    */
+    const maths = BOUNDARIES["edexcel-mathematics"];
+    for (const paper of maths.papers) {
+      assert.equal(paper.bands, undefined, "9MA0 papers should carry no published bands");
+      assert.equal(paper.basis, "indicative");
+      const derived = paperBands("edexcel-mathematics", paper.code)!;
+      assert.ok(derived["A*"] <= paper.marks, `${paper.code} A* exceeds the paper`);
+      assert.ok(derived.E <= derived["A*"], `${paper.code} bands run backwards`);
+    }
+
+    // AQA and OCR do publish component figures, so theirs must be used as-is.
+    for (const paper of BOUNDARIES[ECON].papers) {
+      assert.equal(paper.basis, "notional");
+      assert.ok(paper.bands, `${paper.code} should use its published bands`);
+    }
   });
 
   it("knows how many marks each paper is worth", () => {
