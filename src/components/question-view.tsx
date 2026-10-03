@@ -3,8 +3,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";import { Markdown } from "@/components/markdown";
 import { Badge, Meter } from "@/components/ui";
 import type { MarkingResult } from "@/lib/marking";
+import { markExtended } from "@/lib/marking";
 import type { GeneratedQuestion, WorkedStep } from "@/lib/types";
 import { getChapter } from "@/lib/specs";
+import {
+  autoMarkExtended,
+  calibrationSummary,
+  CALIBRATION_FLOOR,
+  type Calibration,
+} from "@/lib/auto-mark";
 import { Countdown, secondsLeft } from "@/components/clock";
 import { fmtTime } from "@/components/format";
 
@@ -30,7 +37,17 @@ export interface QuestionViewProps {
   canUndo?: boolean;
   onFlag?(): void;
   flagged?: boolean;
-  submitLabel?: string;
+submitLabel?: string;
+  /**
+   * Running calibration of the automatic extended-answer marker.
+   *
+   * Held by the caller rather than kept here because it has to outlive a single
+   * question: the point is that the marker adjusts to this learner over many
+   * answers, and state inside this component dies with the question.
+   */
+  calibration?: Calibration;
+  /** Notified when the learner's self-mark is folded into the calibration. */
+  onCalibrationChange?(calibration: Calibration): void;
 }
 
 /** Default input hint per format, shown as a placeholder. */
@@ -79,8 +96,10 @@ function QuestionBody(props: QuestionViewProps) {
     index,
     total,
     canUndo = false,
-    onFlag,
+onFlag,
     flagged = false,
+    calibration = CALIBRATION_FLOOR,
+    onCalibrationChange,
   } = props;
 
   const format = question.format;
@@ -95,7 +114,12 @@ function QuestionBody(props: QuestionViewProps) {
   const inputRef = useRef<HTMLTextAreaElement | HTMLInputElement>(null);
 
   const scheme = format.kind === "extended" ? format.scheme : null;
-  const levels = format.kind === "extended" ? (format.levels ?? []) : [];
+  // Memoised because a `?? []` inline would be a fresh array on every render, which
+  // would re-run the estimate below on every keystroke for no reason.
+  const levels = useMemo(
+    () => (format.kind === "extended" ? (format.levels ?? []) : []),
+    [format],
+  );
 
   const numeric = format.kind === "numeric";
   const single = format.kind === "single-choice";
@@ -120,8 +144,52 @@ function QuestionBody(props: QuestionViewProps) {
     return selected;
   }
 
-  function submit() {
+  /*
+    The automatic estimate, recomputed while the learner types.
+
+    Memoised because this runs the whole rubric engine over the answer, and it is
+    keyed on the writing only - deliberately not on the scheme ticks, so the
+    estimate describes the text rather than moving around as boxes get ticked.
+  */
+  const autoEstimate = useMemo(() => {
+    if (!extended || !scheme || text.trim().length === 0) return null;
+    const subject = getChapter(question.chapterId)?.subject;
+    if (!subject) return null;
+    return autoMarkExtended(text, scheme, question.chapterId, subject, calibration, undefined, levels);
+  }, [extended, scheme, text, question.chapterId, levels, calibration]);
+
+  const calibrationState = useMemo(() => calibrationSummary(calibration), [calibration]);
+
+function submit() {
     if (!canSubmit || revealed) return;
+
+    /*
+      Fold the learner's self-mark into the calibration before handing the answer
+      up, so the marker starts adjusting from this answer rather than the next one.
+
+      Only the self-mark is recorded here - the estimate itself never enters it, and
+      the recorded mark is still the learner's own, so the ability model keeps
+      treating an extended answer as self-assessed rather than quietly promoting a
+      keyword match to a grade.
+    */
+    if (extended && scheme && autoEstimate) {
+      const claimedMarks = markExtended(scheme, new Set(schemeTicks)).achievedFraction;
+      const subject = getChapter(question.chapterId)?.subject;
+      if (subject) {
+        onCalibrationChange?.(
+          autoMarkExtended(
+            text,
+            scheme,
+            question.chapterId,
+            subject,
+            calibration,
+            claimedMarks,
+            levels,
+          ).calibration,
+        );
+      }
+    }
+
     onSubmit(currentResponse());
   }
 
@@ -328,6 +396,70 @@ function QuestionBody(props: QuestionViewProps) {
 
             {scheme.guidance ? <p className="prose-note">{scheme.guidance}</p> : null}
 
+            {/*
+              The automatic estimate.
+
+              Deliberately an estimate, always shown next to the learner's own mark
+              rather than replacing it, with its confidence stated. A keyword marker
+              that presented itself as an examiner would be worse than the generous
+              self-marking it replaces, so the wording here never implies more
+              authority than the engine has earned.
+            */}
+            {autoEstimate ? (
+              <div className="rounded border border-rule p-3">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <span className="label">Automatic estimate</span>
+                  <span className="flex items-baseline gap-2">
+                    <span className="num text-[15px]">
+                      {autoEstimate.estimatedMarks} / {autoEstimate.totalMarks}
+                    </span>
+                    <Badge tone={autoEstimate.confidence >= 0.5 ? "accent" : "warn"}>
+                      {Math.round(autoEstimate.confidence * 100)}% confident
+                    </Badge>
+                  </span>
+                </div>
+
+                <p className="mt-1 text-[13px] text-ink-2">
+                  {autoEstimate.band} — {autoEstimate.bandRequirement}
+                </p>
+
+                {autoEstimate.linksAvailable > 0 ? (
+                  <p className="mt-1 text-[13px] text-ink-2">
+                    {autoEstimate.linksFound} of {autoEstimate.linksAvailable} chain-of-reasoning
+                    points look earned.{" "}
+                    {autoEstimate.linksFound === 0
+                      ? "There is no linking language in your answer, so these cannot be awarded."
+                      : ""}
+                  </p>
+                ) : null}
+
+                <ul className="mt-2 flex flex-col gap-1">
+                  {autoEstimate.feedback.map((line, i) => (
+                    <li key={i} className="text-[13px] text-ink-2">
+                      {line}
+                    </li>
+                  ))}
+                </ul>
+
+                {autoEstimate.caveats.length > 0 ? (
+                  <details className="mt-2">
+                    <summary className="cursor-pointer text-[13px] text-warn">
+                      Why this estimate may be wrong ({autoEstimate.caveats.length})
+                    </summary>
+                    <ul className="mt-1 flex flex-col gap-1">
+                      {autoEstimate.caveats.map((line, i) => (
+                        <li key={i} className="text-[13px] text-ink-3">
+                          {line}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                ) : null}
+
+                <p className="mt-2 text-[12px] text-ink-3">{calibrationState.message}</p>
+              </div>
+            ) : null}
+
             <div>
               <span className="label">
                 Mark scheme — tick what your answer actually says
@@ -335,6 +467,7 @@ function QuestionBody(props: QuestionViewProps) {
               <ul className="mt-1 divide-y divide-rule border border-rule">
                 {scheme.points.map((point, i) => {
                   const on = schemeTicks.includes(i);
+                  const verdict = autoEstimate?.points.find((p) => p.index === i);
                   return (
                     <li key={i}>
                       <label className="flex cursor-pointer items-start gap-3 p-3">
@@ -354,6 +487,18 @@ function QuestionBody(props: QuestionViewProps) {
                             <span className="text-[14px]">{point.label}</span>
                             {point.isLink ? <Badge tone="accent">chain</Badge> : null}
                             <span className="num text-ink-3 text-[12px]">{point.marks}m</span>
+                            {/*
+                              What the marker thinks, shown on the row rather than
+                              only in the summary. The learner is encouraged to argue
+                              with it, so the disagreement has to be visible per point.
+                            */}
+                            {verdict ? (
+                              <Badge tone={verdict.evidenced ? "ok" : "warn"}>
+                                {verdict.evidenced
+                                  ? "in your answer"
+                                  : `not found (${Math.round(verdict.coverage * 100)}%)`}
+                              </Badge>
+                            ) : null}
                           </span>
                           <span className="mt-0.5 block text-[13px] text-ink-2">{point.detail}</span>
                         </span>

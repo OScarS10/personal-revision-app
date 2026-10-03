@@ -345,6 +345,14 @@ export interface PersistedState {
   /** Exam dates per subject, as local midnight timestamps. */
   examDates: Partial<Record<SubjectId, number>>;
   /**
+  * Running calibration of the automatic extended-answer marker.
+  *
+  * Persisted because the whole point is that the marker adjusts to this learner
+  * over many answers. Held in memory only, it would reset on every reload and the
+  * adjustment would never accumulate past the first few essays.
+  */
+  autoMarkCalibration: import("@/lib/auto-mark").Calibration;
+  /**
    * When the progress blob was last exported.
    *
    * Tracked purely to prompt a backup. Progress lives only in this browser, so

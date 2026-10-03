@@ -8,6 +8,7 @@ import type {
 } from "@/lib/types";
 import { DEFAULT_MODEL_CONFIG } from "@/lib/types";
 import { sanitiseDifficulty } from "@/lib/difficulty";
+import { CALIBRATION_FLOOR, type Calibration } from "@/lib/auto-mark";
 import { createSkillState } from "@/lib/model";
 import { SUBJECT_ORDER, defaultEnabled } from "@/lib/specs";
 
@@ -24,6 +25,22 @@ import { SUBJECT_ORDER, defaultEnabled } from "@/lib/specs";
 export const STORAGE_KEY = "specwise.state.v1";
 export const STATE_VERSION = 1;
 
+/**
+ * Rebuild the marker's calibration from the blob.
+ *
+ * Every field is clamped rather than trusted. The bias is bounded by the same
+ * `MAX_BIAS` the engine applies at runtime, so a hand-edited or corrupted blob
+ * cannot leave the marker permanently relaxed or permanently harsh.
+ */
+function sanitiseCalibration(raw: unknown): Calibration {
+  const c = asRecord(raw);
+  return {
+    samples: Math.max(0, Math.floor(num(c.samples, 0))),
+    bias: Math.max(-0.25, Math.min(0.25, num(c.bias, 0))),
+    disagreement: Math.max(0, Math.min(1, num(c.disagreement, 0))),
+  };
+}
+
 export function createInitialState(now = Date.now()): PersistedState {
   const enabled = {} as Record<SubjectId, string[]>;
   for (const subject of SUBJECT_ORDER) {
@@ -39,8 +56,9 @@ export function createInitialState(now = Date.now()): PersistedState {
     answers: [],
     recentItemIds: [],
     sessions: 0,
-    daily: {},
+daily: {},
     examDates: {},
+    autoMarkCalibration: { ...CALIBRATION_FLOOR },
     lastExportAt: null,
     templateStats: {},
   };
@@ -247,8 +265,9 @@ export function migrateState(raw: unknown, now = Date.now()): PersistedState {
       .filter((v): v is string => typeof v === "string")
       .slice(-200),
     sessions: Math.max(0, Math.floor(num(r.sessions, 0))),
-    daily,
+daily,
     examDates: sanitiseExamDates(r.examDates),
+    autoMarkCalibration: sanitiseCalibration(r.autoMarkCalibration),
     lastExportAt: r.lastExportAt === null || r.lastExportAt === undefined ? null : Math.max(0, num(r.lastExportAt, 0)),
     templateStats: sanitiseTemplateStats(r.templateStats),
   };

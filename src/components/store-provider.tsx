@@ -10,7 +10,7 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react";
-import type { Answer, PersistedState, SubjectId } from "@/lib/types";
+import type { Answer, PersistedState, SkillState, SubjectId, TemplateStat } from "@/lib/types";
 import "@/lib/generators/all";
 import { createInitialState, loadState, safeStorage, saveState, localDateKey } from "@/lib/store";
 import { recordTemplateStat } from "@/lib/calibration";
@@ -18,6 +18,7 @@ import type { StorageLike } from "@/lib/store";
 import { applyAnswer, propagateAbilities } from "@/lib/model";
 import { getChapters, SUBJECT_ORDER } from "@/lib/specs";
 import type { DifficultyPreference } from "@/lib/difficulty";
+import type { Calibration } from "@/lib/auto-mark";
 import { useAuth } from "@/components/auth-provider";
 
 /*
@@ -102,6 +103,8 @@ export interface StoreValue {
   resetAll(): void;
   resetSubject(subject: SubjectId): void;
   setExamDate(subject: SubjectId, at: number | null): void;
+  /** Fold one self-mark comparison into the automatic marker's calibration. */
+  setAutoMarkCalibration(calibration: Calibration): void;
   setDifficulty(preference: DifficultyPreference): void;
   markExported(): void;
 }
@@ -173,46 +176,135 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [user, accessToken]);
 
-  const mergeRemoteState = useCallback((remote: any) => {
+  /**
+  A row as `/api/sync` returns it: raw database columns, so snake_case.
+ *
+  These shapes existed only inside an `any` before. That is not a style complaint -
+  the merge below was reading `a.questionId` off rows that only have
+ * `question_id`, so every pulled answer was silently dropped by the dedupe filter
+  and any skill row was written straight into the store with the wrong keys.
+ */
+interface RemoteRow {
+  [column: string]: unknown;
+}
+
+interface RemoteState {
+  answers?: RemoteRow[];
+  skills?: RemoteRow[];
+  dailyStats?: RemoteRow[];
+  templateStats?: RemoteRow[];
+}
+
+/** Read a column as a number, falling back rather than yielding NaN. */
+function remoteNum(row: RemoteRow, column: string, fallback = 0): number {
+  const value = row[column];
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function remoteStr(row: RemoteRow, column: string): string {
+  const value = row[column];
+  return typeof value === "string" ? value : "";
+}
+
+/** Database rows to an `Answer`, or null if the row is too incomplete to be one. */
+function toAnswer(row: RemoteRow): Answer | null {
+  const questionId = remoteStr(row, "question_id") || remoteStr(row, "questionId");
+  if (!questionId) return null;
+
+  let response: string[] = [];
+  try {
+    const parsed: unknown = JSON.parse(remoteStr(row, "response") || "[]");
+    if (Array.isArray(parsed)) response = parsed.map((v) => String(v));
+  } catch {
+    // A row whose response is not valid JSON is skipped rather than recorded as an
+    // empty answer, which would look like the learner deliberately left it blank.
+    return null;
+  }
+
+  let skillIds: string[] = [];
+  try {
+    const parsed: unknown = JSON.parse(remoteStr(row, "skill_ids") || "[]");
+    if (Array.isArray(parsed)) skillIds = parsed.map((v) => String(v));
+  } catch {
+    skillIds = [];
+  }
+
+  return {
+    questionId,
+    chapterId: remoteStr(row, "chapter_id"),
+    skillIds,
+    specRef: remoteStr(row, "spec_ref"),
+    difficulty: remoteNum(row, "difficulty"),
+    response,
+    correct: Boolean(row.correct),
+    score: remoteNum(row, "score"),
+    marks: remoteNum(row, "marks"),
+    awardedMarks: remoteNum(row, "awarded_marks"),
+    durationMs: remoteNum(row, "duration_ms"),
+    timestamp: remoteNum(row, "timestamp"),
+    template: remoteStr(row, "template"),
+    assessesMastery: Boolean(row.assesses_mastery),
+  };
+}
+
+const mergeRemoteState = useCallback((remote: RemoteState) => {
     const prev = backing.getSnapshot();
 
-    // Merge answers (deduplicate by questionId + timestamp)
+    // Merge answers, deduplicated on questionId + timestamp so a re-pull of the same
+    // window cannot duplicate history.
     const existingAnswers = new Set(prev.answers.map((a) => `${a.questionId}-${a.timestamp}`));
-    const newAnswers = (remote.answers ?? []).filter(
-      (a: any) => !existingAnswers.has(`${a.questionId}-${a.timestamp}`)
-    );
+    const pulled = (remote.answers ?? []).map(toAnswer).filter((a): a is Answer => a !== null);
+    const newAnswers = pulled.filter((a) => !existingAnswers.has(`${a.questionId}-${a.timestamp}`));
 
     // Merge skills (remote wins if newer)
     const skills = { ...prev.skills };
-    for (const skill of remote.skills ?? []) {
-      const existing = skills[skill.id];
-      if (!existing || (skill.updatedAt && new Date(skill.updatedAt).getTime() > new Date(existing.lastSeen ?? 0).getTime())) {
-        skills[skill.id] = skill;
+    for (const row of remote.skills ?? []) {
+      const id = remoteStr(row, "id");
+      if (!id) continue;
+      const lastSeen = remoteNum(row, "last_seen", remoteNum(row, "updatedAt"));
+      const existing = skills[id];
+      if (!existing || lastSeen > (existing.lastSeen ?? 0)) {
+        skills[id] = {
+          ...existing,
+          id,
+          lastSeen,
+        } as SkillState;
       }
     }
 
-    // Merge daily stats (sum them)
+    // Merge daily stats (summed, because both sides have counted their own answers)
     const daily = { ...prev.daily };
-    for (const stat of remote.dailyStats ?? []) {
-      const existing = daily[stat.id];
+    for (const row of remote.dailyStats ?? []) {
+      // The date is the key, stored as `id` in the synced column set.
+      const id = remoteStr(row, "id") || remoteStr(row, "date");
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(id)) continue;
+      const existing = daily[id];
       if (existing) {
-        daily[stat.id] = {
-          attempted: existing.attempted + stat.attempted,
-          correct: existing.correct + stat.correct,
-          durationMs: (existing.durationMs ?? 0) + (stat.durationMs ?? 0),
-          sessions: (existing.sessions ?? 0) + (stat.sessions ?? 0),
+        daily[id] = {
+          attempted: existing.attempted + remoteNum(row, "attempted"),
+          correct: existing.correct + remoteNum(row, "correct"),
         };
       } else {
-        daily[stat.id] = stat;
+        daily[id] = {
+          attempted: remoteNum(row, "attempted"),
+          correct: remoteNum(row, "correct"),
+        };
       }
     }
 
     // Merge template stats (remote wins if newer)
     const templateStats = { ...prev.templateStats };
-    for (const stat of remote.templateStats ?? []) {
-      const existing = templateStats[stat.id];
-      if (!existing || (stat.lastSeen && stat.lastSeen > (existing.lastSeen ?? 0))) {
-        templateStats[stat.id] = stat;
+    for (const row of remote.templateStats ?? []) {
+      const id = remoteStr(row, "id") || remoteStr(row, "template");
+      if (!id) continue;
+      const lastSeen = remoteNum(row, "last_seen", remoteNum(row, "lastSeen"));
+      const existing = templateStats[id];
+      if (!existing || lastSeen > (existing.lastSeen ?? 0)) {
+        templateStats[id] = {
+          ...existing,
+          id,
+          lastSeen,
+        } as TemplateStat;
       }
     }
 
@@ -396,6 +488,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     backing.commit({ ...prev, lastExportAt: Date.now() });
   }, []);
 
+  const setAutoMarkCalibration = useCallback((calibration: Calibration) => {
+    const prev = backing.getSnapshot();
+    // Guard against a stale write from an abandoned question: a calibration that
+    // has fewer samples than the stored one is an older answer arriving late, and
+    // accepting it would roll the marker's adjustment backwards.
+    if (calibration.samples < prev.autoMarkCalibration.samples) return;
+    backing.commit({ ...prev, autoMarkCalibration: calibration });
+  }, []);
+
   const value = useMemo<StoreValue>(
     () => ({
       state,
@@ -410,6 +511,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       resetAll,
       resetSubject,
       setExamDate,
+      setAutoMarkCalibration,
       markExported,
       setDifficulty,
     }),
@@ -425,6 +527,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       resetAll,
       resetSubject,
       setExamDate,
+      setAutoMarkCalibration,
       setDifficulty,
     ],
   );
@@ -445,6 +548,7 @@ const FALLBACK: StoreValue = {
   resetAll: () => {},
   resetSubject: () => {},
   setExamDate: () => {},
+  setAutoMarkCalibration: () => {},
   setDifficulty: () => {},
   markExported: () => {},
 };

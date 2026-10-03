@@ -6,6 +6,7 @@ import type { Answer, Chapter, PersistedState, SkillInsight } from "@/lib/types"
 import { computeInsights } from "@/lib/analytics";
 import { useSession, type SessionSummary, type UseSessionOptions } from "@/components/use-session";
 import { QuestionView } from "@/components/question-view";
+import { useStore } from "@/components/store-provider";
 import { Badge, EmptyState, Meter, PageHeader, SectionHead, Stat } from "@/components/ui";
 import { fmtDuration, fmtPercent } from "@/components/format";
 import { Markdown } from "@/components/markdown";
@@ -43,6 +44,7 @@ const MODE_LABEL: Record<SessionMode, string> = {
 
 export function SessionRunner(props: SessionRunnerProps) {
   const { mode, chapters, enabledIds, state, length, perQuestionSeconds, onRecordAnswer } = props;
+  const { setAutoMarkCalibration } = useStore();
 
   // Insights are derived from the recorded skills, so they update as the
   // session runs and difficulty targeting stays honest within a session.
@@ -135,6 +137,8 @@ export function SessionRunner(props: SessionRunnerProps) {
         total={session.total ?? undefined}
         onFlag={session.toggleBookmark}
         flagged={current.bookmarked}
+        calibration={state.autoMarkCalibration}
+        onCalibrationChange={setAutoMarkCalibration}
         submitLabel={mode === "test" ? "Lock in answer" : undefined}
       />
       <SessionFooter session={session} mode={mode} onExit={props.onExit} />
