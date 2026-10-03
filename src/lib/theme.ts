@@ -120,34 +120,61 @@ export function themeChoiceSnapshot(): ThemeChoice {
   return readThemeChoice();
 }
 
-/** Resolved appearance, which also changes when the OS setting changes. */
+/**
+ * Resolved appearance, which also changes when the OS setting changes.
+ *
+ * Pure on purpose. useSyncExternalStore calls this during render and compares
+ * the result with the previous one, so writing to the DOM from here is both
+ * unreliable and misplaced: React may call it speculatively, and a getSnapshot
+ * that mutates the document cannot be trusted to be idempotent. The DOM write
+ * lives in subscribeTheme and setThemeChoice, which run at the right moments.
+ */
 export function resolvedThemeSnapshot(): ResolvedTheme {
-  return applyChoice(themeChoiceSnapshot());
+  const choice = readThemeChoice();
+  return choice === "system" ? systemTheme() : choice;
 }
 
 /**
  * Watch the preference, the OS setting, and other tabs.
  *
- * Re-applies the theme on subscribe as well as on change. Strict Mode remounts
- * effects in development, and React clears attributes it does not manage from
- * JSX, so without this the document would be left on the server default.
+ * Every path here paints the document before telling React, rather than leaving
+ * the write to a re-render. That ordering is the fix for "system does nothing":
+ * when the OS flips to dark at sunset, the media listener resolves the new
+ * appearance and writes `data-theme` straight away. Previously the listener only
+ * asked React to re-render, so the attribute the CSS keys off was never updated
+ * and the page kept the old palette until something else forced a repaint.
  */
 export function subscribeTheme(onChange: () => void): () => void {
   if (typeof window === "undefined") return () => {};
   listeners.add(onChange);
 
   const media = window.matchMedia("(prefers-color-scheme: dark)");
-  media.addEventListener("change", onChange);
-  // Another tab changing the theme should move this one too.
-  window.addEventListener("storage", onChange);
 
-  // Covers the Strict Mode remount described above.
+  const onMediaChange = () => {
+    applyChoice(readThemeChoice());
+    onChange();
+  };
+
+  // Only this key matters. Reacting to every storage write meant the theme was
+  // reapplied on every unrelated saveState, which is wasteful and, because
+  // storage events also fire for other tabs, re-read the preference needlessly.
+  const onStorage = (event: StorageEvent) => {
+    if (event.key !== null && event.key !== THEME_STORAGE_KEY) return;
+    applyChoice(readThemeChoice());
+    onChange();
+  };
+
+  media.addEventListener("change", onMediaChange);
+  window.addEventListener("storage", onStorage);
+
+  // Covers the Strict Mode remount described above, and any case where the
+  // inline bootstrap ran before this tab's preference was readable.
   applyChoice(themeChoiceSnapshot());
 
   return () => {
     listeners.delete(onChange);
-    media.removeEventListener("change", onChange);
-    window.removeEventListener("storage", onChange);
+    media.removeEventListener("change", onMediaChange);
+    window.removeEventListener("storage", onStorage);
   };
 }
 
