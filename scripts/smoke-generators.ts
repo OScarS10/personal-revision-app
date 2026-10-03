@@ -2,7 +2,7 @@ import { clearRegistry, generatorsFor, hasBespokeGenerators } from "@/lib/genera
 import "@/lib/generators/all";
 import { generateQuestion } from "@/lib/generators/registry";
 import { SUBJECTS, SUBJECT_ORDER, getChapters } from "@/lib/specs";
-import { markQuestion } from "@/lib/marking";
+import { markQuestion, ratingToken } from "@/lib/marking";
 import { parseNumeric, normaliseAnswer } from "@/lib/math-utils";
 
 /*
@@ -71,18 +71,52 @@ function checkQuestion(
     if (none.correct) fail("extended answer with nothing ticked marked correct");
     if (none.awardedMarks > 0) fail(`extended answer with nothing ticked scored ${none.awardedMarks}`);
 
-    const full = markQuestion(q, ["a full answer", ...all]);
-    if (Math.abs(full.awardedMarks - scheme.totalMarks) > 0.01) {
+    /*
+      A rated item is not full marks until the rating is chosen, so the top rating
+      step is part of a full attempt and the ceiling includes it. Comparing against
+      `totalMarks` would pass while checking the wrong total.
+    */
+    const topRating = scheme.rating
+      ? [...scheme.rating.levels].sort((a, b) => b.marks - a.marks)[0]
+      : null;
+    const ceiling = scheme.availableMarks ?? scheme.totalMarks + (scheme.rating?.totalMarks ?? 0);
+
+    const full = markQuestion(q, [
+      "a full answer",
+      ...all,
+      ...(topRating ? [ratingToken(topRating.level)] : []),
+    ]);
+    if (Math.abs(full.awardedMarks - ceiling) > 0.01) {
       fail(
-        `ticking every point gave ${full.awardedMarks} of ${scheme.totalMarks}`,
+        `ticking every point and rating top gave ${full.awardedMarks} of ${ceiling}`,
       );
     }
 
-    const one = markQuestion(q, ["a short answer", "0"]);
-    if (one.awardedMarks >= full.awardedMarks) {
-      fail("one ticked point scored as much as ticking every point");
+    if (topRating && topRating.marks > 0) {
+      /*
+        The rating has to be worth something on its own. Without this, a scheme
+        could carry a decorative scale that never affects the score.
+      */
+      const noRating = markQuestion(q, ["a full answer", ...all]);
+      if (noRating.awardedMarks >= full.awardedMarks) {
+        fail("leaving the rating blank scored as much as rating it fully");
+      }
     }
-    if (!one.selfAssessed) fail("extended answer was not flagged as self-assessed");
+
+    /*
+      The single-tick check only means something when there is more than one point
+      to choose between. On a one-point scheme, "every point" and "that point" are
+      the same action, so the comparison would fail on correct behaviour.
+    */
+    if (scheme.points.length > 1) {
+      const one = markQuestion(q, ["a short answer", "0", ...(topRating ? [ratingToken(topRating.level)] : [])]);
+      if (one.awardedMarks >= full.awardedMarks) {
+        fail("one ticked point scored as much as ticking every point");
+      }
+    }
+    if (!markQuestion(q, ["a", ...all]).selfAssessed) {
+      fail("extended answer was not flagged as self-assessed");
+    }
   } else {
     const result = markQuestion(q, [q.answer]);
     if (!result.correct) {

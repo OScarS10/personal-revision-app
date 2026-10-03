@@ -5,7 +5,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { generateQuestion, generatorsFor } from "@/lib/generators/registry";
 import "@/lib/generators/all";
-import { markQuestion } from "@/lib/marking";
+import { markQuestion, ratingToken } from "@/lib/marking";
 import { SUBJECT_ORDER, getChapters, getChapter } from "@/lib/specs";
 
 /*
@@ -178,20 +178,68 @@ describe("generated questions are answerable", () => {
                   `${chapter.id} (${q.template}): scheme points total ${declared} but declares ${scheme.totalMarks}`,
                 );
               }
-              if (scheme.points.length < 3) {
+              if (scheme.points.length < 3 && !scheme.rating) {
+                /*
+                  A scheme with one point is degenerate: ticking it or not is the
+                  whole decision, so the learner is grading a coin toss. A rating
+                  scale is the other way to give them a real choice, and it is the
+                  only way a 2- or 3-mark item can have one, since three points
+                  would need three marks. So the requirement stands for schemes
+                  with no rating.
+                */
                 problems.push(`${chapter.id} (${q.template}): only ${scheme.points.length} scheme points`);
+              }
+              if (scheme.rating) {
+                const scale = scheme.rating;
+                if (scale.levels.length < 2) {
+                  problems.push(`${chapter.id} (${q.template}): rating has ${scale.levels.length} step(s)`);
+                }
+                /*
+                  Levels are alternatives, so they are not additive: only one is
+                  ever chosen. What has to hold is that the best step is worth the
+                  scale's total, since that is the ceiling, and that a 1-mark scale
+                  never pays a fraction it cannot represent.
+                */
+                const best = Math.max(...scale.levels.map((l) => l.marks));
+                if (best !== scale.totalMarks) {
+                  problems.push(
+                    `${chapter.id} (${q.template}): best rating step is ${best} but the scale declares ${scale.totalMarks}`,
+                  );
+                }
+                if (scale.levels.some((l) => l.marks < 0 || !Number.isFinite(l.marks))) {
+                  problems.push(`${chapter.id} (${q.template}): rating has an unusable step`);
+                }
+                if (scale.levels.some((l) => l.marks % 1 !== 0)) {
+                  problems.push(`${chapter.id} (${q.template}): rating pays a fraction of a mark`);
+                }
+                const available = scheme.availableMarks ?? scheme.totalMarks + scale.totalMarks;
+                if (available !== q.marks) {
+                  problems.push(
+                    `${chapter.id} (${q.template}): available ${available} but question is worth ${q.marks}`,
+                  );
+                }
               }
               if (!scheme.command) {
                 problems.push(`${chapter.id} (${q.template}): no command word`);
               }
               // Ticking everything must reach full marks, and nothing must not.
+              /*
+                "Everything" includes the top rating step. The rating is worth its
+                own marks on top of the points, so ticking the points alone is not
+                a full-mark attempt and must not be scored as one.
+              */
+              const ceiling = scheme.availableMarks ?? scheme.totalMarks;
+              const topRating = scheme.rating
+                ? [...scheme.rating.levels].sort((a, b) => b.marks - a.marks)[0]
+                : null;
               const all = markQuestion(q, [
                 "an answer",
                 ...scheme.points.map((_, i) => String(i)),
+                ...(topRating ? [ratingToken(topRating.level)] : []),
               ]);
-              if (Math.abs(all.awardedMarks - scheme.totalMarks) > 0.01) {
+              if (Math.abs(all.awardedMarks - ceiling) > 0.01) {
                 problems.push(
-                  `${chapter.id} (${q.template}): full ticks gave ${all.awardedMarks} of ${scheme.totalMarks}`,
+                  `${chapter.id} (${q.template}): full ticks gave ${all.awardedMarks} of ${ceiling}`,
                 );
               }
               const none = markQuestion(q, [""]);

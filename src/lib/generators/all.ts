@@ -17,3 +17,4 @@ import "@/lib/generators/aqa-econ-inequality";
 import "@/lib/generators/aqa-econ-macro";
 import "@/lib/generators/aqa-econ-financial";
 import "@/lib/generators/ocr-computer-science";
+import "@/lib/generators/rated";

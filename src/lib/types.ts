@@ -116,6 +116,27 @@ export type QuestionFormat =
  * against these. Each point is a distinct thing the answer could have said,
  * which is what makes the self-mark honest rather than a self-grade.
  */
+/**
+ * The evidence a point accepts, when it is safe to look for automatically.
+ *
+ * Present only for points the app may mark by itself. The accepted terms have
+ * to be written down rather than inferred from the point's prose, because
+ * inferring them is a judgement and a judgement is not trustworthy. A point
+ * without this is the learner's to award, always.
+ */
+export interface AutoPointRule {
+  /**
+   * Terms that count as evidence. The point is awarded only when every one of
+   * them is present, so this is an exact test rather than a similarity score.
+   */
+  keywords: string[];
+  /**
+   * Alternatives for any keyword, where several phrasings are equally correct.
+   * Nested to keep "any of these" unambiguous at the point level.
+   */
+  anyOf?: string[][];
+}
+
 export interface MarkSchemePoint {
   /** Short label for the point, shown before the learner expands their answer. */
   label: string;
@@ -128,6 +149,42 @@ export interface MarkSchemePoint {
    * has the facts but no chain loses the top band without it.
    */
   isLink?: boolean;
+  /**
+   * Set only when this point can be marked without judgement.
+   *
+   * Absent means never automatic. Defaulting the other way would hand out marks
+   * on the strength of a guess, so the safe reading is the one that applies when
+   * nobody has thought about it.
+   */
+  auto?: AutoPointRule;
+}
+
+/**
+ * One rung of a rating scale.
+ *
+ * A rating awards marks on a single axis, judged against a description, rather
+ * than counting whether something was said. That is what lets a short item carry
+ * it: a 2- or 3-mark question has no room for a full levels-of-response rubric,
+ * because five bands cannot be told apart over two marks, but it does have room
+ * for one axis with three steps.
+ */
+export interface RatingLevel {
+  level: number;
+  label: string;
+  /** What the answer has to do to earn this step. */
+  descriptor: string;
+  /** Marks awarded for reaching this level. Ascending, so level 3 is the best. */
+  marks: number;
+}
+
+/** A rating axis, plus what it is worth. */
+export interface RatingScale {
+  /** What is being rated, e.g. "How precisely the concept is stated". */
+  axis: string;
+  /** Ascending by marks. */
+  levels: RatingLevel[];
+  /** What the whole scale is worth, which the levels should sum to. */
+  totalMarks: number;
 }
 
 /** A band in a levels-of-response rubric. */
@@ -145,9 +202,19 @@ export interface MarkScheme {
   /** The command word, since "explain" and "evaluate" reward different things. */
   command: string;
   points: MarkSchemePoint[];
+  /**
+   * Marks available from the points above.
+   *
+   * When a rating is present this excludes the rating's own marks, so a scheme
+   * can state both totals independently and neither can drift from the other.
+   */
   totalMarks: number;
   /** Shown before self-marking so the learner knows what is being looked for. */
   guidance?: string;
+  /** A judged axis, for items too short to carry levels of response. */
+  rating?: RatingScale;
+  /** The most the answer can earn across points and rating together. */
+  availableMarks?: number;
 }
 
 export interface WorkedStep {

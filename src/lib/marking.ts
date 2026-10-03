@@ -4,7 +4,14 @@ import {
   parseNumeric,
   round,
 } from "./math-utils";
-import type { Answer, GeneratedQuestion, LevelDescriptor, MarkScheme, MarkSchemePoint } from "./types";
+import type {
+  Answer,
+  GeneratedQuestion,
+  LevelDescriptor,
+  MarkScheme,
+  MarkSchemePoint,
+  RatingLevel,
+} from "./types";
 
 export interface MarkingResult {
   /** Raw, un-normalised learner input. */
@@ -200,14 +207,24 @@ export function markQuestion(
     case "extended": {
       /*
         Self-marked, so the response is the indices of the points the learner says
-        they hit. Scoring happens in markExtended rather than here, because the
-        learner needs to see the scheme before deciding.
+        they hit, plus a `rating:N` token when the scheme carries a rating. Scoring
+        happens in markExtended rather than here, because the learner needs to see
+        the scheme before deciding.
+
+        The rating token is filtered out before indices are parsed. Left in, it
+        would parse to NaN and be dropped anyway, but relying on that to keep a
+        judgement out of the point index set is a coincidence rather than a
+        decision.
       */
+      const ratingLevel = parseRatingToken(response);
       const indices = new Set(
-        response.map((r) => Number.parseInt(r, 10)).filter((n) => Number.isInteger(n)),
+        response
+          .filter((r) => !r.startsWith(RATING_TOKEN))
+          .map((r) => Number.parseInt(r, 10))
+          .filter((n) => Number.isInteger(n)),
       );
       const scheme = format.scheme;
-      const awarded = markExtended(scheme, indices);
+      const awarded = markExtended(scheme, indices, format.levels, ratingLevel);
       correct = awarded.achievedFraction >= 0.6;
       score = awarded.achievedFraction;
       feedback = awarded.feedback;
@@ -232,6 +249,10 @@ export interface ExtendedResult {
   achieved: number;
   /** Marks those points were worth. */
   achievedMarks: number;
+  /** Marks the rating contributed. Zero when the scheme has no rating. */
+  ratingMarks: number;
+  /** The rating step the learner chose, if the scheme has a rating. */
+  ratingLevel: RatingLevel | null;
   achievedFraction: number;
   /** The band the awarded marks fall into, if the scheme has levels. */
   level: LevelDescriptor | null;
@@ -241,14 +262,42 @@ export interface ExtendedResult {
 }
 
 /**
+ * Prefix marking the chosen rating step in a response.
+ *
+ * The rating has to travel in the same string[] the rest of an extended answer
+ * uses, because that is what gets persisted. A tagged token keeps it separable
+ * from the point indices, so a rating choice can never be read as a claim on a
+ * point and vice versa.
+ */
+export const RATING_TOKEN = "rating:";
+
+export function ratingToken(level: number): string {
+  return `${RATING_TOKEN}${level}`;
+}
+
+/** Read the rating step out of an extended response, if one was chosen. */
+export function parseRatingToken(response: readonly string[]): number | null {
+  for (const token of response) {
+    if (!token.startsWith(RATING_TOKEN)) continue;
+    const level = Number.parseInt(token.slice(RATING_TOKEN.length), 10);
+    if (Number.isFinite(level)) return level;
+  }
+  return null;
+}
+
+/**
  * Score a self-marked extended answer.
  *
- * Two deliberate choices:
+ * Three deliberate choices:
  *
  * Link points are worth more than a simple pro-rata share. AQA awards chain of
  * reasoning separately, so an answer with every fact but no linkage scores
  * below one with fewer facts and a chain, and pro-rata marking would not see
  * that at all.
+ *
+ * A rating is awarded from the step the learner chose, not from the points, so
+ * the two cannot inflate each other: claiming every point still leaves the
+ * rating worth whatever it is worth.
  *
  * A claim is capped at the scheme's own total, so ticking everything cannot
  * produce more than full marks.
@@ -257,6 +306,7 @@ export function markExtended(
   scheme: MarkScheme,
   claimed: Set<number>,
   levels?: LevelDescriptor[],
+  ratingLevel?: number | null,
 ): ExtendedResult {
   const points = scheme.points;
   const hit = points.filter((p, i) => claimed.has(i));
@@ -266,8 +316,21 @@ export function markExtended(
   // Each link point adds a half-mark bonus, reflecting that a linked argument
   // is worth more than the same content listed.
   const linkBonus = linkPoints.length * 0.5;
-  const achievedMarks = Math.min(scheme.totalMarks, baseMarks + linkBonus);
-  const achievedFraction = scheme.totalMarks > 0 ? achievedMarks / scheme.totalMarks : 0;
+
+  /*
+    The rating is looked up by level, and an unknown level falls back to nothing
+    rather than to the nearest rung. Guessing upward on a judgement axis is the
+    exact failure this whole feature exists to avoid, so an unrecognised level
+    earns nothing and the feedback says so.
+  */
+  const scale = scheme.rating;
+  const chosen = scale?.levels.find((l) => l.level === ratingLevel) ?? null;
+  const ratingMarks = chosen?.marks ?? 0;
+  const ratingGiven = scale != null && ratingLevel != null && chosen == null;
+
+  const ceiling = scheme.availableMarks ?? scheme.totalMarks + (scale?.totalMarks ?? 0);
+  const achievedMarks = Math.min(ceiling, baseMarks + linkBonus + ratingMarks);
+  const achievedFraction = ceiling > 0 ? achievedMarks / ceiling : 0;
 
   const band = levels ?? undefined;
   /*
@@ -289,12 +352,22 @@ export function markExtended(
   const missedMarks = points.reduce((s, p) => s + p.marks, 0) - baseMarks;
 
   const parts = [
-    `You claimed ${hit.length} of ${points.length} points, worth ${round(achievedMarks, 1)} of ${scheme.totalMarks}.`,
+    `You claimed ${hit.length} of ${points.length} points, worth ${round(achievedMarks, 1)} of ${ceiling}.`,
   ];
   if (linkPoints.length > 0) {
     parts.push(`${linkPoints.length} of those were chain-of-reasoning points, which carry a bonus.`);
   } else if (points.some((p) => p.isLink)) {
     parts.push("No chain-of-reasoning points were claimed, so the answer cannot reach the top band.");
+  }
+  if (scale) {
+    parts.push(
+      chosen
+        ? `You rated ${axisLower(scale.axis)} as ${chosen.label}, worth ${chosen.marks}.`
+        : `You did not rate ${axisLower(scale.axis)}, so those ${scale.totalMarks} marks are unclaimed.`,
+    );
+    if (ratingGiven) {
+      parts.push(`Level ${ratingLevel} is not on the scale, so it earned nothing.`);
+    }
   }
   if (level) {
     parts.push(`That sits in Level ${level.level}: ${level.label}.`);
@@ -311,11 +384,17 @@ export function markExtended(
   return {
     achieved: hit.length,
     achievedMarks: round(achievedMarks, 2),
+    ratingMarks,
+    ratingLevel: chosen,
     achievedFraction: round(achievedFraction, 4),
     level,
     feedback: parts.join(" "),
     missed,
   };
+}
+
+function axisLower(axis: string): string {
+  return axis.charAt(0).toLowerCase() + axis.slice(1);
 }
 
 /** Build the persisted record for a graded attempt. */
@@ -340,5 +419,15 @@ export function toAnswer(
     timestamp,
     template: question.template,
     assessesMastery: question.assessesMastery,
+    /*
+      Carried onto the answer, because the ability model discounts on this flag and
+      nothing else.
+
+      It used to be left off here, which silently disabled the discount: every
+      self-marked extended answer moved theta at full weight while the model held a
+      whole branch of code meant to damp it down. The flag has to be recorded at the
+      point the answer is built, or the correction is invisible.
+    */
+    selfAssessed: result.selfAssessed,
   };
 }

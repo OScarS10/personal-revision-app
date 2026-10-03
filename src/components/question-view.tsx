@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";import { Markdown } from "@/components/markdown";
 import { Badge, Meter } from "@/components/ui";
 import type { MarkingResult } from "@/lib/marking";
-import { markExtended } from "@/lib/marking";
+import { markExtended, ratingToken } from "@/lib/marking";
 import type { GeneratedQuestion, WorkedStep } from "@/lib/types";
 import { getChapter } from "@/lib/specs";
 import {
@@ -12,6 +12,7 @@ import {
   CALIBRATION_FLOOR,
   type Calibration,
 } from "@/lib/auto-mark";
+import { trustedAward } from "@/lib/trusted-auto";
 import { Countdown, secondsLeft } from "@/components/clock";
 import { fmtTime } from "@/components/format";
 
@@ -106,11 +107,14 @@ onFlag,
   const revealed = phase !== "answering";
   const showFeedback = revealed && !holdFeedback;
 
-  const [text, setText] = useState("");
+const [text, setText] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   // Which mark scheme points the learner claims, by index. Kept separate from
   // the written answer so the two can be required independently.
   const [schemeTicks, setSchemeTicks] = useState<number[]>([]);
+  // Which rating step the learner picked, when the scheme has a scale. Null means
+  // unrated, which is a real state: those marks are then unclaimed.
+  const [ratingChoice, setRatingChoice] = useState<number | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | HTMLInputElement>(null);
 
   const scheme = format.kind === "extended" ? format.scheme : null;
@@ -127,19 +131,50 @@ onFlag,
   const extended = format.kind === "extended";
   const typed = numeric || format.kind === "text" || format.kind === "code" || extended;
 
+  /*
+    Points the app may award on its own, and the result of doing so.
+
+    Only points that list the evidence they accept qualify, and every listed term
+    must be present. The rating is deliberately absent from this calculation and
+    from the ticks below: it stays the learner's, whatever the writing contains.
+  */
+  const trust = useMemo(() => {
+    if (!extended || !scheme || text.trim().length === 0) return null;
+    return trustedAward(scheme, text);
+  }, [extended, scheme, text]);
+
+  /*
+    Points already awarded by the app, so the UI can show them as settled instead
+    of asking the learner to tick them.
+  */
+  const autoAwarded = useMemo(() => new Set(trust?.awarded.map((a) => a.index) ?? []), [trust]);
+
+  // A rated item needs a rating as well as the writing, or the learner would be
+  // able to leave the judgement marks unclaimed and never notice.
+  const ratingScale = scheme?.rating ?? null;
+  const needsRating = ratingScale !== null;
+
   // An extended answer needs both the writing and the self-marking before it
   // counts, otherwise the learner could submit an essay and claim every point.
   const canSubmit = extended
-    ? text.trim().length > 0 && schemeTicks.length > 0
+    ? text.trim().length > 0 &&
+      (autoAwarded.size > 0 || schemeTicks.some((i) => !autoAwarded.has(i))) &&
+      (!needsRating || ratingChoice !== null)
     : typed
       ? text.trim().length > 0
       : selected.length > 0;
 
   function currentResponse(): string[] {
     // For an extended answer the response is the essay plus the indices of the
-    // scheme points the learner is claiming, so the mark can be recomputed from
-    // the stored answer rather than trusted from the UI.
-    if (extended) return [text.trim(), ...schemeTicks.map((i) => String(i))];
+    // scheme points the learner is claiming, plus the rating step, so the mark can
+    // be recomputed from the stored answer rather than trusted from the UI.
+    if (extended) {
+      return [
+        text.trim(),
+        ...schemeTicks.map((i) => String(i)),
+        ...(ratingChoice !== null ? [ratingToken(ratingChoice)] : []),
+      ];
+    }
     if (typed) return [text.trim()];
     return selected;
   }
@@ -173,7 +208,14 @@ function submit() {
       keyword match to a grade.
     */
     if (extended && scheme && autoEstimate) {
-      const claimedMarks = markExtended(scheme, new Set(schemeTicks)).achievedFraction;
+      /*
+        Calibrated against the learner's own claims only, so the points the app
+        already awarded exactly are excluded. Mixing them in would teach the
+        estimate that it had earned marks the keywords earned, which is exactly
+        the confusion the trusted path exists to avoid.
+      */
+      const claimedMarks = markExtended(scheme, new Set(schemeTicks), levels, ratingChoice)
+        .achievedFraction;
       const subject = getChapter(question.chapterId)?.subject;
       if (subject) {
         onCalibrationChange?.(
@@ -466,15 +508,25 @@ function submit() {
               </span>
               <ul className="mt-1 divide-y divide-rule border border-rule">
                 {scheme.points.map((point, i) => {
-                  const on = schemeTicks.includes(i);
+                  /*
+                    A point the app can settle is shown as settled and cannot be
+                    ticked, because ticking it could only agree with the answer
+                    already given. Leaving it interactive would invite the learner
+                    to un-tick a fact they did write, which is the one thing
+                    self-marking should not let them do.
+                  */
+                  const auto = autoAwarded.has(i);
+                  const on = auto || schemeTicks.includes(i);
                   const verdict = autoEstimate?.points.find((p) => p.index === i);
                   return (
                     <li key={i}>
-                      <label className="flex cursor-pointer items-start gap-3 p-3">
+                      <label
+                        className={`flex items-start gap-3 p-3 ${auto ? "" : "cursor-pointer"}`}
+                      >
                         <input
                           checked={on}
                           className="mt-1 accent-[var(--accent)]"
-                          disabled={revealed}
+                          disabled={revealed || auto}
                           onChange={() =>
                             setSchemeTicks((prev) =>
                               prev.includes(i) ? prev.filter((x) => x !== i) : [...prev, i],
@@ -486,13 +538,14 @@ function submit() {
                           <span className="flex flex-wrap items-baseline gap-2">
                             <span className="text-[14px]">{point.label}</span>
                             {point.isLink ? <Badge tone="accent">chain</Badge> : null}
+                            {auto ? <Badge tone="ok">checked for you</Badge> : null}
                             <span className="num text-ink-3 text-[12px]">{point.marks}m</span>
                             {/*
                               What the marker thinks, shown on the row rather than
                               only in the summary. The learner is encouraged to argue
                               with it, so the disagreement has to be visible per point.
                             */}
-                            {verdict ? (
+                            {verdict && !auto ? (
                               <Badge tone={verdict.evidenced ? "ok" : "warn"}>
                                 {verdict.evidenced
                                   ? "in your answer"
@@ -501,6 +554,12 @@ function submit() {
                             ) : null}
                           </span>
                           <span className="mt-0.5 block text-[13px] text-ink-2">{point.detail}</span>
+                          {auto ? (
+                            <span className="mt-1 block text-[12px] text-ink-3">
+                              Every term this point looks for appears in your answer, so the mark is
+                              awarded automatically.
+                            </span>
+                          ) : null}
                         </span>
                       </label>
                     </li>
@@ -512,6 +571,53 @@ function submit() {
                 leave anything you could not actually write off.
               </p>
             </div>
+
+            {/*
+              The rating, presented as a scale rather than more boxes, because a
+              rating is a judgement about quality and the learner has to see the
+              steps side by side to choose between them. The app never picks one.
+            */}
+            {ratingScale ? (
+              <div>
+                <span className="label">
+                  {ratingScale.axis} ({ratingScale.totalMarks}m)
+                </span>
+                <p className="mt-1 text-[13px] text-ink-2">
+                  Read your own answer and pick the step that describes it. This is your judgement,
+                  so the app does not make it for you.
+                </p>
+                <ul className="mt-1 divide-y divide-rule border border-rule">
+                  {[...ratingScale.levels]
+                    .sort((a, b) => a.marks - b.marks)
+                    .map((step) => {
+                      const chosen = ratingChoice === step.level;
+                      return (
+                        <li key={step.level}>
+                          <label className="flex cursor-pointer items-start gap-3 p-3">
+                            <input
+                              checked={chosen}
+                              className="mt-1 accent-[var(--accent)]"
+                              disabled={revealed}
+                              name={`rating-${question.id}`}
+                              onChange={() => setRatingChoice(step.level)}
+                              type="radio"
+                            />
+                            <span className="min-w-0 flex-1">
+                              <span className="flex flex-wrap items-baseline gap-2">
+                                <span className="text-[14px]">{step.label}</span>
+                                <span className="num text-ink-3 text-[12px]">{step.marks}m</span>
+                              </span>
+                              <span className="mt-0.5 block text-[13px] text-ink-2">
+                                {step.descriptor}
+                              </span>
+                            </span>
+                          </label>
+                        </li>
+                      );
+                    })}
+                </ul>
+              </div>
+            ) : null}
 
             {levels.length > 0 ? (
               <details>
