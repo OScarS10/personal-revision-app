@@ -9,6 +9,7 @@ import type {
   SubjectId,
 } from "@/lib/types";
 import { clamp, logistic } from "@/lib/math-utils";
+import { BOUNDARIES, type GradeBands } from "@/lib/grades";
 import {
   confidenceOf,
   inferPriorTheta,
@@ -16,15 +17,25 @@ import {
   retentionOf,
 } from "@/lib/model";
 
-/** Indicative grade boundaries as a weighted fraction of the specification. */
-const GRADE_CUTS: Array<{ grade: string; cut: number }> = [
-  { grade: "A*", cut: 0.87 },
-  { grade: "A", cut: 0.8 },
-  { grade: "B", cut: 0.7 },
-  { grade: "C", cut: 0.58 },
-  { grade: "D", cut: 0.47 },
-  { grade: "E", cut: 0.37 },
-];
+/**
+  Grade bands in mastery space, for a given subject.
+ *
+  This used to be one hardcoded table applied to every subject: A* at 0.87, A at
+  0.80, B at 0.70, then 0.58 / 0.47 / 0.37. That spacing matches no board - it was
+  a guess, and it was silently presented as a grade. The bands now come from
+  `grades.ts`, which holds each qualification's own boundaries.
+ *
+  The mapping stays approximate, and has to: weighted mastery is a 0..1 estimate of
+  coverage, not a raw mark. The letter is therefore an estimate off the real
+  thresholds, and the exact raw-mark table is shown separately so the learner can
+  see the numbers rather than only the letter.
+*/
+function gradeCutsFor(subject: SubjectId): Array<{ grade: string; cut: number }> {
+  return (Object.keys(BOUNDARIES[subject].bands) as Array<keyof GradeBands>).map((grade) => ({
+    grade,
+    cut: BOUNDARIES[subject].bands[grade],
+  }));
+}
 
 /** Standard normal CDF via the Abramowitz-Stegun erf approximation. */
 function normalCdf(z: number): number {
@@ -237,10 +248,13 @@ export function computeSkillTags(insights: SkillInsight[]): SkillTagInsight[] {
   return out.sort((a, b) => b.weakness - a.weakness);
 }
 
-function gradeProbabilities(weightedMastery: number): OverallProfile["gradeProbabilities"] {
+function gradeProbabilities(
+  subject: SubjectId,
+  weightedMastery: number,
+): OverallProfile["gradeProbabilities"] {
   // A logistic noise term of ~0.11 turns a point estimate into a distribution.
   const noise = 0.11;
-  const boundaries = [...GRADE_CUTS].reverse();
+  const boundaries = [...gradeCutsFor(subject)].reverse();
   const probs: OverallProfile["gradeProbabilities"] = [];
   let previous = 0;
   const above: Array<{ grade: string; p: number }> = [];
@@ -328,10 +342,10 @@ export function buildProfile({
     mastery,
     confidence,
     theta: ability,
-    grade: gradeProbabilities(mastery).reduce((best, p) =>
+    grade: gradeProbabilities(subject, mastery).reduce((best, p) =>
       p.probability > best.probability ? p : best,
     ).grade,
-    gradeProbabilities: gradeProbabilities(mastery),
+    gradeProbabilities: gradeProbabilities(subject, mastery),
     coverage,
     chaptersTested: tested.length,
     chaptersEnabled: active.length,

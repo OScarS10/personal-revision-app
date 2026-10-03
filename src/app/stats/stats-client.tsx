@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { SUBJECTS, SUBJECT_ORDER, getChapters } from "@/lib/specs";
+import { BOUNDARIES, boundaryTable } from "@/lib/grades";
+import { clamp } from "@/lib/math-utils";
 import { buildProfile, computeInsights } from "@/lib/analytics";
 import type { SubjectId } from "@/lib/types";
 import { useStore } from "@/components/store-provider";
@@ -82,6 +84,19 @@ export function StatsPage() {
 
   const peak = Math.max(1, ...history.map((d) => d.attempted));
 
+  /*
+    The raw-mark view of the grade estimate.
+
+    Mastery is a 0..1 coverage figure, not a mark, so projecting it onto a raw-mark
+    total is an estimate - the same estimate the probabilities above are built on,
+    expressed in the unit the exam is actually marked in. Shown so the letter grade
+    has numbers behind it rather than standing alone as a verdict.
+  */
+  const boundaries = boundaryTable(profile.subject);
+  const totalMarks = BOUNDARIES[profile.subject].totalMarks;
+  const boundarySource = BOUNDARIES[profile.subject].boundarySource;
+  const projectedMarks = Math.round(clamp(profile.mastery, 0, 1) * totalMarks);
+
   return (
     <div className="page page-wide">
       <PageHeader
@@ -144,9 +159,50 @@ export function StatsPage() {
               </div>
             ))}
             <p className="prose-note mt-3">
-              Mastery {masteryWord(profile.mastery)} mapped onto the official linear A-level
-              boundaries. Treat this as a rough guide, not a prediction.
+              Mastery {masteryWord(profile.mastery)} mapped onto this subject&apos;s own boundaries.
+              Treat it as a rough guide, not a prediction.
             </p>
+
+            {/*
+              The raw-mark table, shown because the probabilities above are derived
+              from a mastery estimate rather than from marks. A learner aiming at a
+              grade needs the number to aim at, and an invented cut presented as an
+              official boundary was the thing worth fixing here.
+            */}
+            <div className="mt-4 border-t border-rule pt-4">
+              <h3 className="text-[13px] font-medium">{SUBJECTS[profile.subject].name} boundaries</h3>
+              <table className="mt-2 w-full text-[13px]">
+                <caption className="sr-only">Marks needed for each grade</caption>
+                <thead>
+                  <tr className="text-left text-ink-3">
+                    <th className="py-1 font-normal">Grade</th>
+                    <th className="py-1 text-right font-normal">Marks needed</th>
+                    <th className="py-1 text-right font-normal">Projected</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {boundaries.map(({ grade, mark }) => (
+                    <tr key={grade} className="border-t border-rule/60">
+                      <td className="py-1">{grade}</td>
+                      <td className="num py-1 text-right">
+                        {mark}
+                        <span className="text-ink-3">/{totalMarks}</span>
+                      </td>
+                      <td className="py-1 text-right">
+                        {projectedMarks >= mark ? (
+                          <span className="text-ok">reached</span>
+                        ) : (
+                          <span className="text-ink-3">{mark - projectedMarks} to go</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="prose-note mt-3">
+                Your {totalMarks}-mark total is projected at {projectedMarks} from mastery. {boundarySource}
+              </p>
+            </div>
           </div>
         </div>
 
