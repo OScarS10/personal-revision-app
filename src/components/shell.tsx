@@ -12,7 +12,6 @@ import type { SubjectId } from "@/lib/types";
 
 const NAV: Array<{ href: string; label: string; hint: string }> = [
   { href: "/", label: "Overview", hint: "Where you stand" },
-  { href: "/plan", label: "Today", hint: "What to do next, and what's due" },
   { href: "/practice", label: "Practice", hint: "Adaptive questions with feedback" },
   { href: "/test", label: "Mock", hint: "Timed paper, feedback at the end" },
   { href: "/review", label: "Review", hint: "Spaced repetition queue" },
@@ -48,7 +47,7 @@ function SubjectBar() {
           </Link>
 
           {/*
-            Eight links plus the brand and theme toggle need ~1010px. Below lg
+            Seven links plus the brand and theme toggle need ~920px. Below lg
             they do not fit, so the menu button covers that band instead of the
             header overflowing sideways.
           */}

@@ -3,20 +3,18 @@ import { describe, it } from "node:test";
 import { markExtended, markQuestion } from "@/lib/marking";
 import "@/lib/generators/all";
 import { recordTemplateStat, templateCalibration, calibrationReport } from "@/lib/calibration";
-import { buildStudyPlan, dailySlice, buildNotebook } from "@/lib/planning";
+import { buildNotebook, daysBetween } from "@/lib/planning";
 import { applyAnswer } from "@/lib/model";
 import { createInitialState, migrateState, exportState, importState } from "@/lib/store";
-import { computeInsights } from "@/lib/analytics";
 import { SUBJECTS, SUBJECT_ORDER, getChapters, getChapter } from "@/lib/specs";
 import { getGeneratorsForSpec } from "./helpers";
-import type { Answer, GeneratedQuestion, MarkScheme, PersistedState } from "@/lib/types";
+import type { Answer, GeneratedQuestion, MarkScheme } from "@/lib/types";
 
 /*
   The four things this project got wrong before, guarded so they stay fixed:
 
   - an item that does not assess the chapter was allowed to move ability,
   - hand-set difficulty was treated as measured fact,
-  - "what should I do today" was answered by "you are weak here",
   - a self-assessed score was trusted as though an examiner had set it.
 */
 
@@ -239,79 +237,31 @@ describe("difficulty calibration", () => {
   });
 });
 
-describe("study plan", () => {
-  function stateWith(extra: Partial<PersistedState> = {}): PersistedState {
-    return { ...createInitialState(NOW), ...extra };
-  }
-
-  function insightsFor(state: PersistedState) {
-    const enabled = SUBJECT_ORDER.flatMap((s) => state.enabled[s] ?? []);
-    return computeInsights({
-      chapters: SUBJECT_ORDER.flatMap((s) => getChapters(s)),
-      skills: state.skills,
-      enabledIds: new Set(enabled),
-      config: state.config,
-      now: NOW,
-    });
-  }
-
-  it("counts down to the soonest exam", () => {
-    const state = stateWith({ examDates: { "edexcel-mathematics": NOW + 10 * DAY } });
-    const plan = buildStudyPlan(state, insightsFor(state), NOW);
-    assert.equal(plan.daysToExam, 10);
-    assert.equal(plan.nextExam?.subject, "edexcel-mathematics");
+describe("exam countdown arithmetic", () => {
+  it("counts whole calendar days, not 24-hour blocks", () => {
+    // Read at lunchtime on the 1st for an exam at midnight on the 11th.
+    const read = new Date(2026, 0, 1, 12, 30).getTime();
+    const exam = new Date(2026, 0, 11, 0, 0, 0).getTime();
+    assert.equal(daysBetween(read, exam), 10);
   });
 
-  it("reports no countdown when no date is set", () => {
-    const state = stateWith();
-    const plan = buildStudyPlan(state, insightsFor(state), NOW);
-    assert.equal(plan.daysToExam, null);
-    assert.equal(plan.nextExam, null);
+  it("reports a past date as negative", () => {
+    const now = new Date(2026, 4, 20, 9, 0).getTime();
+    const past = new Date(2026, 4, 15, 0, 0, 0).getTime();
+    assert.equal(daysBetween(now, past), -5);
   });
 
-  it("does not crash on an exam date in the past", () => {
-    const state = stateWith({ examDates: { "edexcel-mathematics": NOW - 5 * DAY } });
-    const plan = buildStudyPlan(state, insightsFor(state), NOW);
-    assert.equal(plan.daysToExam, -5);
+  it("is zero for the same calendar day, whatever the time of day", () => {
+    const morning = new Date(2026, 2, 3, 8, 0).getTime();
+    const evening = new Date(2026, 2, 3, 21, 0).getTime();
+    assert.equal(daysBetween(morning, evening), 0);
   });
 
-  it("ranks a chapter with an exam this week above an identical one in months", () => {
-    const state = stateWith({
-      examDates: {
-        "edexcel-mathematics": NOW + 3 * DAY,
-        "aqa-economics": NOW + 200 * DAY,
-      },
-    });
-    const plan = buildStudyPlan(state, insightsFor(state), NOW);
-    const soon = plan.tasks.filter((t) => t.subject === "edexcel-mathematics");
-    const later = plan.tasks.filter((t) => t.subject === "aqa-economics");
-    const soonMax = Math.max(...soon.map((t) => t.priority));
-    const laterMax = Math.max(...later.map((t) => t.priority));
-    assert.ok(soonMax > laterMax, `soon ${soonMax} should outrank later ${laterMax}`);
-  });
-
-  it("always returns at least one task when there is work", () => {
-    const state = stateWith();
-    const plan = buildStudyPlan(state, insightsFor(state), NOW);
-    assert.ok(plan.tasks.length > 0);
-    assert.equal(dailySlice(plan, 1).length, 1, "a tiny budget must not yield an empty plan");
-  });
-
-  it("respects the time budget", () => {
-    const state = stateWith();
-    const plan = buildStudyPlan(state, insightsFor(state), NOW);
-    const slice = dailySlice(plan, 30);
-    const used = slice.reduce((s, t) => s + t.minutes, 0);
-    assert.ok(used <= 30 || slice.length === 1, `used ${used} minutes of a 30 minute budget`);
-  });
-
-  it("gives every task a reason, so the plan is not a black box", () => {
-    const state = stateWith({ examDates: { "edexcel-mathematics": NOW + 2 * DAY } });
-    const plan = buildStudyPlan(state, insightsFor(state), NOW);
-    for (const task of plan.tasks) {
-      assert.ok(task.reason.length > 0, `${task.chapterId} has no reason`);
-      assert.ok(task.minutes > 0);
-    }
+  it("survives a daylight-saving change without drifting", () => {
+    // UK clocks go forward on the last Sunday of March 2026.
+    const before = new Date(2026, 2, 28, 12, 0).getTime();
+    const after = new Date(2026, 2, 30, 12, 0).getTime();
+    assert.equal(daysBetween(before, after), 2);
   });
 });
 

@@ -3,8 +3,10 @@
 import { useMemo, useState } from "react";
 import { SUBJECTS, SUBJECT_ORDER, allSkillTags, getChapters, getPapers } from "@/lib/specs";
 import { computeInsights } from "@/lib/analytics";
+import { daysBetween } from "@/lib/planning";
 import type { Chapter, SubjectId } from "@/lib/types";
 import { useStore } from "@/components/store-provider";
+import { useNow } from "@/components/clock";
 import { Badge, EmptyState, Meter, PageHeader, SectionHead, Segmented, SeverityBadge } from "@/components/ui";
 import { fmtPercent, masteryWord } from "@/components/format";
 
@@ -139,6 +141,8 @@ export function ChaptersPage() {
           </div>
         ))}
       </div>
+
+      <ExamDates />
 
       {visible.length === 0 ? (
         <div className="panel">
@@ -330,4 +334,72 @@ function ChapterRow({
       ) : null}
     </div>
   );
+}
+
+/**
+ * Exam dates, per subject, with a countdown.
+ *
+ * These used to live on the daily-plan page. Nothing about them belonged to the
+ * plan specifically - a date is a fact about the learner, not a piece of advice -
+ * so they live here now, next to the specification they are counting down to.
+ */
+function ExamDates() {
+  const { state, setExamDate } = useStore();
+  // From the shared clock rather than Date.now(), which is an impure read during
+  // render. This also keeps the countdown live as the exam approaches.
+  const now = useNow();
+
+  return (
+    <div className="panel mb-6">
+      <SectionHead
+        title="Exam dates"
+        hint="Counted in whole days, so an exam on Friday reads as two days on Wednesday morning."
+      />
+      <div className="grid gap-4 sm:grid-cols-3">
+        {SUBJECT_ORDER.map((id) => {
+          const at = state.examDates[id];
+          const days = at === undefined ? null : daysBetween(now, at);
+          return (
+            <div key={id} className="border-rule border p-3">
+              <span className="text-[14px]">{SUBJECTS[id].shortName}</span>
+              <div className="mt-1.5">
+                {days === null ? (
+                  <span className="text-[13px] text-ink-3">Not set</span>
+                ) : (
+                  <span className={`num text-[20px] ${days < 0 ? "text-ink-3" : days <= 14 ? "text-warn" : ""}`}>
+                    {days < 0 ? "past" : `${days}d`}
+                  </span>
+                )}
+              </div>
+              <label className="mt-2 block">
+                <span className="sr-only">{SUBJECTS[id].shortName} exam date</span>
+                <input
+                  className="field"
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    if (!raw) {
+                      setExamDate(id, null);
+                      return;
+                    }
+                    // Parsed as a local date, so the countdown is not shifted by
+                    // a timezone.
+                    const parsed = new Date(`${raw}T00:00:00`);
+                    if (!Number.isNaN(parsed.getTime())) setExamDate(id, parsed.getTime());
+                  }}
+                  type="date"
+                  value={at === undefined ? "" : toInputDate(at)}
+                />
+              </label>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** A timestamp as the yyyy-mm-dd string a date input expects, in local time. */
+function toInputDate(at: number): string {
+  const d = new Date(at);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }

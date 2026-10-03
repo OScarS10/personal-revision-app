@@ -98,14 +98,14 @@ export function DashboardPage() {
         }
         actions={
           <div className="flex flex-wrap gap-2">
-            <Link className="btn btn-primary" href="/plan">
-              Today&apos;s plan
-            </Link>
-            <Link className="btn" href="/practice">
+            <Link className="btn btn-primary" href="/practice">
               Practise
             </Link>
             <Link className="btn" href="/test">
               Mock test
+            </Link>
+            <Link className="btn" href="/review">
+              Review queue
             </Link>
           </div>
         }
