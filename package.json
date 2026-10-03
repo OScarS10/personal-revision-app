@@ -1,50 +1,52 @@
 {
-  "name": "revision-app",
-  "version": "0.1.0",
-  "private": true,
-  "scripts": {
-    "dev": "next dev",
-    "build": "next build && tsx scripts/stamp-service-worker.ts",
-    "start": "next start",
-    "lint": "eslint",
-    "typecheck": "tsc --noEmit",
-    "smoke": "tsx scripts/smoke-generators.ts",
-    "lint:latex": "tsx scripts/lint-latex.ts",
-    "samples": "tsx scripts/sample-questions.ts",
-    "verify": "npm run typecheck && npm run lint && npm run test && npm run lint:latex && npm run smoke",
-    "test": "tsx --test tests/*.test.ts",
-    "report:selector": "tsx scripts/report-selector.ts",
-    "check:browser": "tsx scripts/check-browser.ts",
-    "check:layout": "tsx scripts/audit-layout.ts",
-    "preview": "npm run build && next start",
-    "db:migrate": "tsx scripts/migrate.ts"
-  },
-  "dependencies": {
-    "@tanstack/react-query": "^5.104.1",
-    "@types/katex": "^0.16.8",
-    "@vercel/postgres": "^0.10.0",
-    "bcryptjs": "^3.0.3",
-    "dexie": "^4.4.6",
-    "jose": "^6.2.12",
-    "katex": "^0.18.10",
-    "next": "16.3.8",
-    "react": "19.2.8",
-    "react-dom": "19.2.8",
-    "zod": "^4.6.5"
-  },
-  "devDependencies": {
-    "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "16.3.8",
-    "tailwindcss": "^4",
-    "tsx": "^4.23.15",
-    "typescript": "^5"
-  },
-  "allowScripts": {
-    "esbuild@0.28.2": true,
-    "unrs-resolver@1.12.2": true
-  }
+    "name":  "revision-app",
+    "version":  "0.1.0",
+    "private":  true,
+    "scripts":  {
+                    "dev":  "next dev",
+                    "build":  "next build \u0026\u0026 tsx scripts/stamp-service-worker.ts",
+                    "start":  "next start",
+                    "lint":  "eslint",
+                    "typecheck":  "tsc --noEmit",
+                    "smoke":  "tsx scripts/smoke-generators.ts",
+                    "lint:latex":  "tsx scripts/lint-latex.ts",
+                    "samples":  "tsx scripts/sample-questions.ts",
+                    "verify":  "npm run typecheck \u0026\u0026 npm run lint \u0026\u0026 npm run test \u0026\u0026 npm run lint:latex \u0026\u0026 npm run smoke",
+                    "test":  "tsx --test tests/*.test.ts",
+                    "report:selector":  "tsx scripts/report-selector.ts",
+                    "corpus:fetch":  "tsx scripts/fetch-mark-corpus.ts",
+                    "corpus:train":  "tsx scripts/train-mark-model.ts",
+                    "check:browser":  "tsx scripts/check-browser.ts",
+                    "check:layout":  "tsx scripts/audit-layout.ts",
+                    "preview":  "npm run build \u0026\u0026 next start",
+                    "db:migrate":  "tsx scripts/migrate.ts"
+                },
+    "dependencies":  {
+                         "@tanstack/react-query":  "^5.104.1",
+                         "@types/katex":  "^0.16.8",
+                         "@vercel/postgres":  "^0.10.0",
+                         "bcryptjs":  "^3.0.3",
+                         "dexie":  "^4.4.6",
+                         "jose":  "^6.2.12",
+                         "katex":  "^0.18.10",
+                         "next":  "16.3.8",
+                         "react":  "19.2.8",
+                         "react-dom":  "19.2.8",
+                         "zod":  "^4.6.5"
+                     },
+    "devDependencies":  {
+                            "@tailwindcss/postcss":  "^4",
+                            "@types/node":  "^20",
+                            "@types/react":  "^19",
+                            "@types/react-dom":  "^19",
+                            "eslint":  "^9",
+                            "eslint-config-next":  "16.3.8",
+                            "tailwindcss":  "^4",
+                            "tsx":  "^4.23.15",
+                            "typescript":  "^5"
+                        },
+    "allowScripts":  {
+                         "esbuild@0.28.2":  true,
+                         "unrs-resolver@1.12.2":  true
+                     }
 }

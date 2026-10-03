@@ -41,3 +41,7 @@ yarn-error.log*
 next-env.d.ts
 
 .vercel
+
+# Externally sourced marking data and raw scrapes. Licensed material never goes in.
+.cache/
+corpus/sources.json

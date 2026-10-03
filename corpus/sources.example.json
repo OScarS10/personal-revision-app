@@ -1,0 +1,15 @@
+[
+  {
+    "source": "my-institution",
+    "kind": "local-file",
+    "url": "file:.cache/corpus/seeds/my-institution.json",
+    "licence": "CC-BY-4.0",
+    "redistributable": true,
+    "year": 2025,
+    "fields": {
+      "prompt": "question",
+      "reference": "model_answer",
+      "points": "marking"
+    }
+  }
+]
