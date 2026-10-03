@@ -137,8 +137,39 @@ const AUDIT = `(() => {
   };
 })()`;
 
+/** One observed spacing value and how many times it was seen. */
+interface SpacingSample {
+  v: number;
+  n: number;
+}
+
+/** What the in-page audit script returns. */
+interface AuditRow {
+  /** Spacing samples, keyed by the measurement the script took. */
+  sectionGaps?: SpacingSample[];
+  panelPad?: SpacingSample[];
+  cards?: SpacingSample[];
+  listGaps?: SpacingSample[];
+  leadings?: SpacingSample[];
+  /** The design-token values the script compared against. */
+  target?: unknown;
+  /** Sample counts, used only for the per-page log line. */
+  counts?: {
+    sectionGaps: number;
+    panelPad: number;
+    cards: number;
+    listGaps: number;
+    leadings: number;
+  };
+}
+
+/** The CDP envelope around an evaluated expression's result. */
+interface EvalEnvelope {
+  result?: { value?: unknown };
+}
+
 interface Cdp {
-  send(method: string, params?: Record<string, unknown>): Promise<any>;
+  send(method: string, params?: Record<string, unknown>): Promise<unknown>;
   goto(path: string): Promise<void>;
   eval<T>(expression: string): Promise<T>;
   close(): void;
@@ -178,7 +209,9 @@ async function connect(wsUrl: string): Promise<Cdp> {
       returnByValue: true,
       awaitPromise: true,
     });
-    return res?.result?.value as T;
+    // Narrowed through the CDP envelope rather than `any`, which was how a renamed
+    // envelope field could have compiled cleanly and returned undefined here.
+    return (res as EvalEnvelope | null)?.result?.value as T;
   };
   cdp.goto = async (path: string) => {
     await cdp.send("Page.navigate", { url: `${BASE}${path}` });
@@ -234,16 +267,19 @@ async function main(): Promise<void> {
 
     for (const path of PATHS) {
       await cdp.goto(path);
-      const a = await cdp.eval<any>(AUDIT);
+      const a = await cdp.eval<AuditRow | null>(AUDIT);
       if (!a) continue;
       merged.target = a.target;
       for (const k of Object.keys(merged) as Array<keyof typeof merged>) {
         if (k === "target") continue;
-        for (const row of a[k] as Array<{ v: number; n: number }>) {
+        for (const row of a[k] ?? []) {
           (merged[k] as Map<number, number>).set(row.v, ((merged[k] as Map<number, number>).get(row.v) ?? 0) + row.n);
         }
       }
-      console.log(`  ${path}  gaps:${a.counts.sectionGaps} panels:${a.counts.panelPad} lists:${a.counts.listGaps} text:${a.counts.leadings}`);
+      const c = a.counts;
+      console.log(
+        `  ${path}  gaps:${c?.sectionGaps ?? 0} panels:${c?.panelPad ?? 0} lists:${c?.listGaps ?? 0} text:${c?.leadings ?? 0}`
+      );
     }
 
     const fmt = (m: Map<number, number>) =>

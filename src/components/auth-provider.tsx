@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from "react";
+import { createContext, useCallback, useContext, useSyncExternalStore, ReactNode } from "react";
 import { SessionUser } from "@/lib/auth";
 
 interface AuthContextType {
@@ -20,50 +20,104 @@ const AuthContext = createContext<AuthContextType | null>(null);
 
 const AUTH_STORAGE_KEY = "specwise-auth";
 
-function getStoredAuth(): { user: SessionUser; accessToken: string } | null {
+/**
+  The stored session, as an external store.
+ *
+  This used to be `useState` plus a mount effect that called `setUser` twice. That
+  pattern is wrong twice over: it cascades an extra render on every page load, and
+  the server renders `null` while the client's first render used `null` too only by
+  accident of ordering. `useSyncExternalStore` fixes both - the server snapshot is
+  genuinely `null`, so hydration is deterministic, and reading localStorage is an
+  external-system read rather than a state update.
+*/
+let listeners: Array<() => void> = [];
+
+interface StoredAuth {
+  user: SessionUser;
+  accessToken: string;
+}
+
+function subscribe(listener: () => void): () => void {
+  listeners.push(listener);
+  return () => {
+    listeners = listeners.filter((l) => l !== listener);
+  };
+}
+
+function readAuth(): StoredAuth | null {
   if (typeof window === "undefined") return null;
   try {
     const stored = localStorage.getItem(AUTH_STORAGE_KEY);
     if (!stored) return null;
-    return JSON.parse(stored);
+    const parsed: unknown = JSON.parse(stored);
+    if (!parsed || typeof parsed !== "object") return null;
+    const { user, accessToken } = parsed as Partial<StoredAuth>;
+    if (!user || typeof accessToken !== "string") return null;
+    return { user, accessToken };
   } catch {
     return null;
   }
 }
 
+/** Notify subscribers after the stored session changes. */
+function emit() {
+  for (const listener of [...listeners]) listener();
+}
+
+function getStoredAuth(): StoredAuth | null {
+  return readAuth();
+}
+
 function setStoredAuth(user: SessionUser, accessToken: string) {
   if (typeof window === "undefined") return;
   localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({ user, accessToken }));
+  emit();
 }
 
 function clearStoredAuth() {
   if (typeof window === "undefined") return;
   localStorage.removeItem(AUTH_STORAGE_KEY);
+  emit();
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<SessionUser | null>(null);
-  const [accessToken, setAccessToken] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const stored = useSyncExternalStore(subscribe, readAuth, () => null);
+  const user = stored?.user ?? null;
+  const accessToken = stored?.accessToken ?? null;
+  // Hydration is the only time this is true, and it matches how the server
+  // rendered, so nothing flashes a signed-out shell for a signed-in learner.
+  const isLoading = false;
 
-  // Initialize from localStorage
-  useEffect(() => {
-    const stored = getStoredAuth();
-    if (stored) {
-      setUser(stored.user);
-      setAccessToken(stored.accessToken);
+  /*
+    Declared before `refreshToken`, which calls it.
+
+    It previously came after, so `refreshToken` closed over a `const` that had not
+    been initialised yet - a temporal dead zone reference that only blew up on the
+    one path where a refresh actually failed.
+  */
+  const logout = useCallback(async () => {
+    try {
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+        credentials: "include",
+      });
+    } catch {
+      // Ignore errors: the local session is cleared either way, and the cookie is
+      // best-effort.
+    } finally {
+      clearStoredAuth();
     }
-    setIsLoading(false);
-  }, []);
+  }, [accessToken]);
 
   const refreshToken = useCallback(async () => {
     try {
-      const refreshToken = document.cookie
+      const refreshTokenCookie = document.cookie
         .split("; ")
         .find((row) => row.startsWith("refreshToken="))
         ?.split("=")[1];
 
-      if (!refreshToken) throw new Error("No refresh token");
+      if (!refreshTokenCookie) throw new Error("No refresh token");
 
       const response = await fetch("/api/auth/refresh", {
         method: "POST",
@@ -73,14 +127,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!response.ok) throw new Error("Refresh failed");
 
       const data = await response.json();
-      setUser(data.user);
-      setAccessToken(data.accessToken);
       setStoredAuth(data.user, data.accessToken);
     } catch (error) {
       console.error("Token refresh failed:", error);
       await logout();
     }
-  }, []);
+  }, [logout]);
 
   const apiCall = useCallback(
     async (url: string, options: RequestInit = {}) => {
@@ -122,8 +174,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { error: data.error ?? "Login failed" };
       }
 
-      setUser(data.user);
-      setAccessToken(data.accessToken);
       setStoredAuth(data.user, data.accessToken);
       return {};
     },
@@ -145,29 +195,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { error: data.error ?? "Registration failed" };
       }
 
-      setUser(data.user);
-      setAccessToken(data.accessToken);
       setStoredAuth(data.user, data.accessToken);
       return {};
     },
     []
   );
-
-  const logout = useCallback(async () => {
-    try {
-      await fetch("/api/auth/logout", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${accessToken}` },
-        credentials: "include",
-      });
-    } catch {
-      // Ignore errors
-    } finally {
-      setUser(null);
-      setAccessToken(null);
-      clearStoredAuth();
-    }
-  }, [accessToken]);
 
   const updateProfile = useCallback(
     async (updates: { name?: string; avatar_url?: string }) => {
@@ -182,10 +214,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       const data = await response.json();
-      setUser(data.user);
-      setStoredAuth(data.user, accessToken!);
+      // Re-read the token rather than closing over `accessToken`, which may be stale
+      // by the time the request resolves after a refresh.
+      const current = readAuth();
+      if (current) setStoredAuth(data.user, current.accessToken);
     },
-    [apiCall, accessToken]
+    [apiCall]
   );
 
   const changePassword = useCallback(

@@ -13,6 +13,8 @@
  * The local IndexedDB remains the primary store; sync is best-effort.
  */
 
+import type { Answer } from "@/lib/types";
+
 interface SyncConfig {
   provider: "vercel-postgres" | "supabase" | "none";
   enabled: boolean;
@@ -89,7 +91,7 @@ export async function pushToRemote(): Promise<SyncResult> {
   return result;
 }
 
-async function upsertAnswerRemote(answer: any): Promise<void> {
+async function upsertAnswerRemote(answer: Answer): Promise<void> {
   if (!isSyncEnabled()) return;
 
   if (syncConfig.provider === "vercel-postgres") {
