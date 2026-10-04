@@ -44,11 +44,13 @@ function copyDir(src: string, dest: string): void {
 }
 
 const nextAppDir = ".next/server/app";
+const nextBuildIdFile = ".next/BUILD_ID";
 const standaloneDir = ".next/standalone";
 const staticOutDir = "out";
 const sourceWorker = "public/sw.source.js";
 
 let targetDir: string;
+let useBuildIdFile = false;
 let workerPath: string;
 let pages: string[];
 
@@ -67,40 +69,59 @@ if (existsSync(staticOutDir)) {
   if (pages.length === 0) {
     pages = collect(standaloneDir).filter((p) => p.endsWith(".html")).sort();
   }
-} else if (existsSync(nextAppDir)) {
+} else if (existsSync(nextBuildIdFile) || existsSync(nextAppDir)) {
   /*
     The default `next build` output, and the only mode Vercel uses. This was
-    missing, so on Vercel the build failed at this step with "no output directory
-    found" - the script knew about static export and standalone but not about a
-    normal build.
+    missing, so on Vercel the build failed here with "no output directory found" -
+    the script knew about static export and standalone but not about a normal
+    build.
 
     The stamped copy has to land in `public/`, because that is the directory
     Vercel uploads for this mode, and the worker is registered at `/sw.js`. That
     makes it a generated file rather than a committed one, hence `sw.source.js`
     as the tracked template and `public/sw.js` in .gitignore. The template stays
     untouched, so a build leaves no diff behind.
+
+    Note there may be no HTML files here at all: a local build emits one per
+    prerendered route, but Vercel's build produced none and this step failed on
+    `pages.length === 0`. The build id does not come from the pages below, which
+    is why that check moved.
   */
-  targetDir = nextAppDir;
+  targetDir = existsSync(nextAppDir) ? nextAppDir : ".next";
+  useBuildIdFile = true;
   workerPath = "public/sw.js";
-  pages = collect(nextAppDir).sort();
+  pages = collect(targetDir).filter((p) => p.endsWith(".html")).sort();
 } else {
   console.error(
-    "stamp-service-worker: no output directory found (out/, .next/standalone/ or .next/server/app); run `next build` first",
+    "stamp-service-worker: no output directory found (out/, .next/standalone/ or .next/); run `next build` first",
   );
   process.exit(1);
 }
 
-if (pages.length === 0) {
-  console.error(`stamp-service-worker: no HTML pages found in ${targetDir}`);
+/*
+  The cache name only has to change when the build changes. Next already mints a
+  fresh `.next/BUILD_ID` for exactly that purpose, so prefer it: it is available
+  in every build mode, including Vercel's, where no HTML is emitted. Hashing the
+  rendered pages is the fallback for static export and standalone.
+*/
+let buildId: string;
+if (useBuildIdFile && existsSync(nextBuildIdFile)) {
+  buildId = readFileSync(nextBuildIdFile, "utf8").trim().replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 12);
+  if (buildId.length === 0) {
+    console.error(`stamp-service-worker: ${nextBuildIdFile} is empty`);
+    process.exit(1);
+  }
+} else if (pages.length > 0) {
+  const hash = createHash("sha256");
+  for (const page of pages) {
+    hash.update(relative(targetDir, page).replace(/\\/g, "/"));
+    hash.update(readFileSync(page));
+  }
+  buildId = hash.digest("hex").slice(0, 12);
+} else {
+  console.error(`stamp-service-worker: nothing to derive a build id from in ${targetDir}`);
   process.exit(1);
 }
-
-const hash = createHash("sha256");
-for (const page of pages) {
-  hash.update(relative(targetDir, page).replace(/\\/g, "/"));
-  hash.update(readFileSync(page));
-}
-const buildId = hash.digest("hex").slice(0, 12);
 
 const worker = readFileSync(sourceWorker, "utf8");
 if (!worker.includes(PLACEHOLDER)) {
@@ -111,4 +132,4 @@ if (!worker.includes(PLACEHOLDER)) {
 }
 
 writeFileSync(workerPath, worker.split(PLACEHOLDER).join(buildId));
-console.log(`stamp-service-worker: cache specwise-${buildId} over ${pages.length} pages`);
+console.log(`stamp-service-worker: cache specwise-${buildId} for ${targetDir}`);
