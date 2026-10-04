@@ -3,14 +3,32 @@ import bcrypt from "bcryptjs";
 import { query, queryOne } from "@/lib/db/client";
 import { z } from "zod";
 
-const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET ?? (() => {
+/*
+  Resolved per call, not at module load.
+
+  `next build` imports every route module to collect page configuration, and it
+  does so with NODE_ENV=production. Reading the secret at module scope therefore
+  threw during the build itself, which made a runtime-only requirement - a key
+  the running server needs in order to sign sessions - into a precondition for
+  compiling the app at all. Every production build failed until the secret was
+  already present, for no reason related to what the build produces.
+
+  Deferring the read to first use keeps the property that actually matters: in
+  production a missing secret throws rather than falling back to the
+  development key, so nothing can ever sign a session with a value published in
+  this repository. The failure now lands when a token is genuinely needed
+  instead of when the module happens to be imported.
+*/
+function jwtSecret(): Uint8Array {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
     if (process.env.NODE_ENV === "production") {
       throw new Error("JWT_SECRET environment variable is required in production");
     }
-    return "dev-secret-change-in-production-min-32-chars-long!!";
-  })()
-);
+    return new TextEncoder().encode("dev-secret-change-in-production-min-32-chars-long!!");
+  }
+  return new TextEncoder().encode(secret);
+}
 
 const ACCESS_TOKEN_EXPIRY = "15m";
 const REFRESH_TOKEN_EXPIRY = "7d";
@@ -86,7 +104,7 @@ export async function createAccessToken(user: SessionUser): Promise<string> {
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime(ACCESS_TOKEN_EXPIRY)
-    .sign(JWT_SECRET);
+    .sign(jwtSecret());
 }
 
 /**
@@ -110,7 +128,7 @@ export async function createRefreshToken(userId: string, userAgent?: string, ipA
  */
 export async function verifyAccessToken(token: string): Promise<SessionUser | null> {
   try {
-    const { payload } = await jwtVerify(token, JWT_SECRET);
+    const { payload } = await jwtVerify(token, jwtSecret());
     if (payload.type !== "access") return null;
     return { id: payload.id as string, email: payload.email as string, name: payload.name as string | null };
   } catch {
