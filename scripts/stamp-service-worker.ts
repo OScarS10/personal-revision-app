@@ -43,14 +43,18 @@ function copyDir(src: string, dest: string): void {
   }
 }
 
+const nextAppDir = ".next/server/app";
 const standaloneDir = ".next/standalone";
 const staticOutDir = "out";
+const sourceWorker = "public/sw.source.js";
 
 let targetDir: string;
+let workerPath: string;
 let pages: string[];
 
 if (existsSync(staticOutDir)) {
   targetDir = staticOutDir;
+  workerPath = join(staticOutDir, "sw.js");
   pages = collect(staticOutDir).sort();
 } else if (existsSync(standaloneDir)) {
   targetDir = standaloneDir;
@@ -58,12 +62,31 @@ if (existsSync(staticOutDir)) {
   if (!existsSync(standalonePublic)) {
     copyDir("public", standalonePublic);
   }
+  workerPath = join(standalonePublic, "sw.js");
   pages = collect(standaloneDir).filter((p) => p.includes(".next/server/app") && p.endsWith(".html")).sort();
   if (pages.length === 0) {
     pages = collect(standaloneDir).filter((p) => p.endsWith(".html")).sort();
   }
+} else if (existsSync(nextAppDir)) {
+  /*
+    The default `next build` output, and the only mode Vercel uses. This was
+    missing, so on Vercel the build failed at this step with "no output directory
+    found" - the script knew about static export and standalone but not about a
+    normal build.
+
+    The stamped copy has to land in `public/`, because that is the directory
+    Vercel uploads for this mode, and the worker is registered at `/sw.js`. That
+    makes it a generated file rather than a committed one, hence `sw.source.js`
+    as the tracked template and `public/sw.js` in .gitignore. The template stays
+    untouched, so a build leaves no diff behind.
+  */
+  targetDir = nextAppDir;
+  workerPath = "public/sw.js";
+  pages = collect(nextAppDir).sort();
 } else {
-  console.error("stamp-service-worker: no output directory found (out/ or .next/standalone/); run `next build` first");
+  console.error(
+    "stamp-service-worker: no output directory found (out/, .next/standalone/ or .next/server/app); run `next build` first",
+  );
   process.exit(1);
 }
 
@@ -79,18 +102,10 @@ for (const page of pages) {
 }
 const buildId = hash.digest("hex").slice(0, 12);
 
-const workerPath = existsSync(join(targetDir, "sw.js"))
-  ? join(targetDir, "sw.js")
-  : join(targetDir, "public", "sw.js");
-if (!existsSync(workerPath)) {
-  console.error(`stamp-service-worker: sw.js not found in ${targetDir}`);
-  process.exit(1);
-}
-
-const worker = readFileSync(workerPath, "utf8");
+const worker = readFileSync(sourceWorker, "utf8");
 if (!worker.includes(PLACEHOLDER)) {
   console.error(
-    `stamp-service-worker: no ${PLACEHOLDER} placeholder in ${workerPath}, so the cache name cannot be versioned`,
+    `stamp-service-worker: no ${PLACEHOLDER} placeholder in ${sourceWorker}, so the cache name cannot be versioned`,
   );
   process.exit(1);
 }

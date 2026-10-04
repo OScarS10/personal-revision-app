@@ -17,6 +17,12 @@
 /.next/
 /out/
 
+# The service worker that is actually served. `public/sw.source.js` is the tracked
+# template; the build stamps a build id into a copy at this path. It is generated
+# rather than committed so that a build does not leave the tree dirty with a
+# per-deploy cache name.
+/public/sw.js
+
 # production
 /build
 

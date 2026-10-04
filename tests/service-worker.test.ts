@@ -13,7 +13,10 @@ import { findProjectRoot } from "./generators.test";
 import test from "node:test";
 
 const ROOT = findProjectRoot();
-const source = readFileSync(join(ROOT, "public", "sw.js"), "utf8");
+// The tracked template. `public/sw.js` is generated from it by the build and is
+// gitignored, so asserting against it would only ever see one machine's last
+// build rather than the source of truth.
+const source = readFileSync(join(ROOT, "public", "sw.source.js"), "utf8");
 const stamp = readFileSync(join(ROOT, "scripts", "stamp-service-worker.ts"), "utf8");
 const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as {
   scripts: Record<string, string>;
@@ -25,7 +28,7 @@ test("the cache name is versioned per build", () => {
   // stale along with it.
   assert.ok(
     source.includes("__BUILD_ID__"),
-    "public/sw.js should carry a __BUILD_ID__ placeholder rather than a fixed cache name",
+    "public/sw.source.js should carry a __BUILD_ID__ placeholder rather than a fixed cache name",
   );
   assert.ok(
     /const CACHE = "specwise-/.test(source),
@@ -51,7 +54,7 @@ test("the build step that stamps the cache is wired into the build", () => {
 
 test("every exported route is in the offline shell", () => {
   const shell = /const SHELL = \[([\s\S]*?)\]/.exec(source);
-  assert.ok(shell, "public/sw.js should declare a SHELL list");
+  assert.ok(shell, "public/sw.source.js should declare a SHELL list");
   const listed = [...(shell[1]!.matchAll(/"([^"]+)"/g))].map((m) => m[1]!);
 
   // Derived from the app's own route directories so a new screen cannot be added
@@ -68,7 +71,7 @@ test("a failed precache does not stop the worker taking over", () => {
   // If skipWaiting is chained behind the precache, a single 404 leaves the
   // previous worker in charge and the update never lands.
   const install = /addEventListener\("install"[\s\S]*?\}\);/.exec(source);
-  assert.ok(install, "public/sw.js should have an install handler");
+  assert.ok(install, "public/sw.source.js should have an install handler");
   assert.ok(
     install[0].includes("skipWaiting"),
     "install should call skipWaiting so a new worker is not left waiting forever",
@@ -81,7 +84,7 @@ test("a failed precache does not stop the worker taking over", () => {
 
 test("activation only keeps the current cache", () => {
   const activate = /addEventListener\("activate"[\s\S]*?\}\);/.exec(source);
-  assert.ok(activate, "public/sw.js should have an activate handler");
+  assert.ok(activate, "public/sw.source.js should have an activate handler");
   assert.ok(
     activate[0].includes("CACHE"),
     "activate should keep the current cache and delete the rest, so a deploy cannot be served from the old one",
@@ -91,7 +94,7 @@ test("activation only keeps the current cache", () => {
 test("error responses are not cached", () => {
   // Caching a 404 pins a transient failure to that route until the next deploy.
   const navigations = /request\.mode === "navigate"[\s\S]*?\n  \}/.exec(source);
-  assert.ok(navigations, "public/sw.js should have a navigation branch");
+  assert.ok(navigations, "public/sw.source.js should have a navigation branch");
   assert.ok(
     /response\.ok/.test(navigations[0]),
     "the navigation branch should check response.ok before writing to the cache",
