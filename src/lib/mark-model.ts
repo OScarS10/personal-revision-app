@@ -223,6 +223,16 @@ export function metrics(pairs: Array<{ actual: number; predicted: number }>, thr
  * Stratified, because an unbalanced label would otherwise put every awarded point
  * in one fold and leave another with nothing but negatives, which flatters the
  * result exactly where it matters least.
+ *
+ * Every fold is now used. This previously dealt the data into `folds` groups,
+ * trained once on the complement of the first, and reported that single holdout,
+ * so the name described something five times more thorough than the code. It
+ * also quietly distorted the trust gate: the holdout is a fifth of the corpus,
+ * so `support` counted a fifth of the awarded examples, and the report's "only N
+ * awarded examples" reason quoted a different number from the support column
+ * printed beside it. Pooling every fold puts each sample in exactly one test set
+ * once, so `support` is the real count of awarded examples and the two numbers
+ * agree by construction rather than by coincidence.
  */
 export function crossValidate(
   features: Features[],
@@ -239,38 +249,40 @@ export function crossValidate(
 
   /*
     Fold assignment walks the labels once, keeping a separate running count per
-    class so every fifth positive goes to fold 0 and so on. Splitting on index
-    alone would put all the positives in the early folds whenever the data was
-    ordered by label, which is how most exports arrive.
+    class so the classes are dealt round-robin rather than in contiguous blocks.
+    Splitting on index alone would put all the positives in the early folds
+    whenever the data was ordered by label, which is how most exports arrive.
   */
-  const testIdx = new Set<number>();
+  const foldOf = new Array<number>(labels.length).fill(0);
   const perClassCount = [0, 0];
   labels.forEach((label, i) => {
     const cls = label === 1 ? 0 : 1;
-    if (perClassCount[cls]! % folds === 0) testIdx.add(i);
+    foldOf[i] = perClassCount[cls]! % folds;
     perClassCount[cls]!++;
   });
 
-  const trainX: Features[] = [];
-  const trainY: number[] = [];
-  const testX: Features[] = [];
-  const testY: number[] = [];
-  features.forEach((feat, i) => {
-    if (testIdx.has(i)) {
-      testX.push(feat);
-      testY.push(labels[i]!);
-    } else {
-      trainX.push(feat);
-      trainY.push(labels[i]!);
-    }
-  });
-  if (trainX.length === 0) return metrics([]);
-
-  const w = train(trainX, trainY, vocab, opts);
   const out: Array<{ actual: number; predicted: number }> = [];
-  testX.forEach((feat, i) => {
-    out.push({ actual: testY[i]!, predicted: predict(w, feat) });
-  });
+  for (let fold = 0; fold < folds; fold++) {
+    const trainX: Features[] = [];
+    const trainY: number[] = [];
+    const testX: Features[] = [];
+    const testY: number[] = [];
+    features.forEach((feat, i) => {
+      if (foldOf[i] === fold) {
+        testX.push(feat);
+        testY.push(labels[i]!);
+      } else {
+        trainX.push(feat);
+        trainY.push(labels[i]!);
+      }
+    });
+    if (trainX.length === 0 || testX.length === 0) continue;
+
+    const w = train(trainX, trainY, vocab, opts);
+    testX.forEach((feat, i) => {
+      out.push({ actual: testY[i]!, predicted: predict(w, feat) });
+    });
+  }
 
   return metrics(out);
 }
@@ -282,15 +294,44 @@ export function crossValidate(
  * dominated by the majority class, so a model that never says "awarded" scores
  * well and is useless. Precision is the number that answers the question that
  * matters here: when the app awards a mark on its own, how often is it right.
+ *
+ * 1.0, not 0.98, and the difference is the whole point.
+ *
+ * A model measured at 98% precision is wrong about one award in fifty. Across an
+ * eight-point paper that is roughly a one-in-six chance of at least one mark the
+ * app gave for something the examiner would not, which is not "100% trusted" by
+ * any reading - it is a number chosen to look close to one.
+ *
+ * Worth being clear about what 1.0 does and does not mean, because the ceiling
+ * here is honesty rather than safety. Measured precision of 1.0 means no false
+ * positive appeared in cross-validation. It is not a guarantee about the next
+ * answer; it is the strongest statement a finite sample supports. So this
+ * threshold is not what makes the model safe to mark with. What makes it safe is
+ * that nothing here is wired into marking at all: the structural gate in
+ * `trusted-auto.ts` decides what the app settles, and it decides by checking
+ * listed terms against the writing rather than by predicting. This constant
+ * measures whether the model has earned a place at that table, and at 1.0 the
+ * honest answer for any realistic corpus is no.
  */
-export const TRUST_PRECISION = 0.98;
+export const TRUST_PRECISION = 1.0;
 
 /** Below this many examples, precision is not distinguishable from a guess. */
 export const MIN_SUPPORT_FOR_TRUST = 40;
 
 export interface PointTypeReport {
   label: string;
+  /**
+   * Awarded examples of this kind, which is what precision is measured against.
+   *
+   * Deliberately not the total. A label with 90 points, 45 of them awarded, has 45
+   * examples to learn from and 45 chances to be wrong, so reporting 90 as its
+   * "support" both overstated the evidence and contradicted the reason string
+   * beside it, which quotes the awarded count. `points` carries the total for
+   * anyone who wants the denominator.
+   */
   support: number;
+  /** Every point of this kind, awarded or not. */
+  points: number;
   cv: Metrics;
   trusted: boolean;
   reason: string;
@@ -315,7 +356,7 @@ export function evaluateCorpus(corpus: MarkCorpus, folds = 5): ModelReport {
   const stats = corpusStats(corpus);
   const reports: PointTypeReport[] = [];
 
-  for (const { label, total } of stats.byLabel) {
+  for (const { label, total, awarded } of stats.byLabel) {
     const docs: string[] = [];
     const labels: number[] = [];
     for (const item of corpus.items) {
@@ -342,7 +383,7 @@ export function evaluateCorpus(corpus: MarkCorpus, folds = 5): ModelReport {
       reason = `Cross-validated precision ${(cv.precision * 100).toFixed(1)}%, below the ${(TRUST_PRECISION * 100).toFixed(0)}% bar. Stays with the learner.`;
     }
 
-    reports.push({ label, support: total, cv, trusted, reason });
+    reports.push({ label, support: awarded, points: total, cv, trusted, reason });
   }
 
   const limitation =

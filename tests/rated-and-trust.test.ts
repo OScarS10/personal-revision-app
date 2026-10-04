@@ -518,12 +518,143 @@ describe("the model earns the right to mark", () => {
     assert.ok(report.byLabel[0]!.support < MIN_SUPPORT_FOR_TRUST);
   });
 
-  it("states the bar it is holding itself to", () => {
-    assert.ok(TRUST_PRECISION >= 0.95);
+  it("holds itself to exactly 100%, not to a number that looks like it", () => {
+    /*
+      This asserted `>= 0.95`, which 0.98 satisfies, so it passed against the
+      threshold the requester explicitly ruled out while appearing to guard it.
+      The requirement was that automatic marks be 100% trusted, so the test now
+      says 1.0 or it says nothing.
+    */
+    assert.equal(TRUST_PRECISION, 1);
     const { corpus } = validateCorpus({ version: 1, provenance: [], items: [] });
     const report = evaluateCorpus(corpus);
     assert.deepEqual(report.trusted, []);
     assert.match(report.limitation ?? "", /no model was trained/);
+  });
+
+  it("counts every awarded example, not one fold's share of them", () => {
+    /*
+      Pooled across all folds, so support is the corpus's real count of awarded
+      examples. It used to be the size of a single holdout, which made the report
+      quote "only 12 awarded examples" in the reason while the support column
+      beside it printed 60.
+    */
+    const docs: string[] = [];
+    const labels: number[] = [];
+    for (let i = 0; i < 200; i++) {
+      docs.push(`marginal returns fall and costs ${i}`);
+      labels.push(i % 2);
+    }
+    const positives = labels.filter((l) => l === 1).length;
+    const vocab = buildVocabulary(docs);
+    const cv = crossValidate(
+      docs.map((d) => featurise(d, vocab)),
+      labels,
+      vocab,
+      5,
+    );
+    assert.equal(cv.support, positives);
+    // Every sample is predicted exactly once across the folds, so the test set
+    // is the whole corpus rather than a fifth of it.
+    assert.equal(cv.tp + cv.fn, positives);
+    assert.equal(cv.tp + cv.fp + cv.fn + cv.tn, docs.length);
+  });
+
+  it("reports support as the awarded count, not the total", () => {
+    /*
+      An earlier version of this test built a corpus where every point was
+      awarded, so crossValidate refused to score it as single-class data and the
+      point passed for the wrong reason: the support bar fired, not the precision
+      bar. Worth knowing that a single-class label cannot exercise precision at
+      all, which is why the positive and negative cases below both need both.
+    */
+    const items = [];
+    for (let i = 0; i < 45; i++) {
+      items.push({
+        id: `pos-${i}`,
+        source: "inst",
+        prompt: `Explain mechanism ${i}.`,
+        reference: "The mechanism causes the effect directly and without exception.",
+        points: [{ label: "explains the link", marks: 1, awarded: true }],
+      });
+      items.push({
+        id: `neg-${i}`,
+        source: "inst",
+        prompt: `Describe situation ${i}.`,
+        reference: "No mechanism is offered here, only an assertion.",
+        points: [{ label: "explains the link", marks: 1, awarded: false }],
+      });
+    }
+    const { corpus } = validateCorpus({
+      version: 1,
+      provenance: [
+        {
+          source: "inst",
+          url: "https://example.invalid",
+          retrievedAt: "2026-01-01T00:00:00.000Z",
+          licence: "CC0-1.0",
+          redistributable: true,
+        },
+      ],
+      items,
+    });
+    const report = evaluateCorpus(corpus);
+    const r = report.byLabel[0]!;
+    assert.equal(r.points, 90);
+    assert.equal(r.support, 45, "support must count awarded examples only");
+    assert.equal(r.support, r.cv.support);
+    // The reason quotes the awarded count, never the inflated total.
+    assert.ok(
+      !/\b90\b/.test(r.reason),
+      `reason "${r.reason}" quotes the total point count instead of the awarded count`,
+    );
+  });
+
+  it("clears the 100% bar when cross-validation makes no mistake at all", () => {
+    /*
+      Documenting the honest consequence of a 1.0 bar: it is reachable. A corpus
+      this cleanly separable does earn trust, which is correct arithmetic and also
+      the reason the artifact stays unwired. Whether a corpus is separable is a
+      property of how it was built - this one separates on its prompt templates,
+      not on answer content - so a curated corpus reaching 100% is not by itself
+      evidence that a model understands marking.
+    */
+    const items = [];
+    for (let i = 0; i < 45; i++) {
+      items.push({
+        id: `pos-${i}`,
+        source: "inst",
+        prompt: `Explain mechanism ${i}.`,
+        reference: "The mechanism causes the effect directly and without exception.",
+        points: [{ label: "explains the link", marks: 1, awarded: true }],
+      });
+      items.push({
+        id: `neg-${i}`,
+        source: "inst",
+        prompt: `Describe situation ${i}.`,
+        reference: "No mechanism is offered here, only an assertion.",
+        points: [{ label: "explains the link", marks: 1, awarded: false }],
+      });
+    }
+    const { corpus } = validateCorpus({
+      version: 1,
+      provenance: [
+        {
+          source: "inst",
+          url: "https://example.invalid",
+          retrievedAt: "2026-01-01T00:00:00.000Z",
+          licence: "CC0-1.0",
+          redistributable: true,
+        },
+      ],
+      items,
+    });
+    const report = evaluateCorpus(corpus);
+    const r = report.byLabel[0]!;
+    assert.equal(r.cv.precision, 1);
+    assert.equal(r.trusted, true);
+    assert.deepEqual(report.trusted, ["explains the link"]);
+    assert.equal(report.limitation, null);
   });
 
   it("counts a confusion matrix consistently", () => {
