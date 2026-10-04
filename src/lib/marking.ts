@@ -4,6 +4,7 @@ import {
   parseNumeric,
   round,
 } from "./math-utils";
+import { trustedAward } from "./trusted-auto";
 import type {
   Answer,
   GeneratedQuestion,
@@ -57,6 +58,18 @@ function splitResponse(input: string | string[], split: boolean): string[] {
     .map((part) => part.trim())
     .filter((part) => part.length > 0);
   return parts.length > 0 ? parts : [input.trim()];
+}
+
+/**
+  True when a response token is a point index or a rating token rather than writing.
+
+  An extended response is `[essay, ...claimed indices, rating:N]`, so the essay has
+  to be picked out rather than assumed to be first: a blank or index-only response
+  would otherwise hand "0" to the trust check as if it were prose.
+*/
+function isPointIndex(part: string, ratingPrefix: string): boolean {
+  if (part.startsWith(ratingPrefix)) return true;
+  return Number.isInteger(Number.parseInt(part, 10));
 }
 
 /** Strip a trailing unit so "12.5 m" is accepted for an answer of "12.5". */
@@ -217,13 +230,34 @@ export function markQuestion(
         decision.
       */
       const ratingLevel = parseRatingToken(response);
-      const indices = new Set(
-        response
-          .filter((r) => !r.startsWith(RATING_TOKEN))
-          .map((r) => Number.parseInt(r, 10))
-          .filter((n) => Number.isInteger(n)),
-      );
+      const claimed = response
+        .filter((r) => !r.startsWith(RATING_TOKEN))
+        .map((r) => Number.parseInt(r, 10))
+        .filter((n) => Number.isInteger(n));
+
+      /*
+        Points the app settles for itself are re-derived here from the answer text
+        rather than read out of the response.
+
+        The learner interface shows these as already ticked, but it does not send
+        them, and it must not: sending them would make the award something the
+        client asserts, which is worth exactly as much as the learner ticking the
+        same point by hand. Nothing about the point would then be automatic. So
+        the response carries the writing and the learner's own claims only, and
+        this recomputes the trusted set from the writing - the same answer, marked
+        the same way, every time it is recomputed from storage.
+
+        Before this, a learner who wrote all the required terms saw a point ticked
+        "for you" and was scored zero on it, because only their own ticks reached
+        the scorer.
+      */
       const scheme = format.scheme;
+      const indices = new Set(claimed);
+      const essay = response.find((part) => !isPointIndex(part, RATING_TOKEN));
+      if (essay !== undefined) {
+        for (const award of trustedAward(scheme, essay).awarded) indices.add(award.index);
+      }
+
       const awarded = markExtended(scheme, indices, format.levels, ratingLevel);
       correct = awarded.achievedFraction >= 0.6;
       score = awarded.achievedFraction;

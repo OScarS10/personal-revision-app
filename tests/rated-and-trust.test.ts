@@ -4,6 +4,7 @@ import "@/lib/generators/all";
 import { SUBJECT_ORDER, getChapters } from "@/lib/specs";
 import { generateQuestion, generatorsFor } from "@/lib/generators/registry";
 import { markExtended, markQuestion, ratingToken, parseRatingToken } from "@/lib/marking";
+import { round } from "@/lib/math-utils";
 import {
   containsTerm,
   trustFormat,
@@ -13,7 +14,7 @@ import {
   trustedAward,
   trustedPointIndexes,
 } from "@/lib/trusted-auto";
-import type { MarkScheme, RatingScale } from "@/lib/types";
+import type { GeneratedQuestion, MarkScheme, RatingScale } from "@/lib/types";
 import { corpusStats, mayCommit, validateCorpus } from "@/lib/mark-corpus";
 import {
   buildVocabulary,
@@ -218,6 +219,102 @@ describe("rating in marking", () => {
   it("does not read a rating token as a point claim", () => {
     // "rating:3" must not parse into the point index set.
     assert.equal(parseRatingToken([ratingToken(3)]), 3);
+  });
+});
+
+describe("trusted award reaches the score", () => {
+  /*
+    The end-to-end half.
+
+    Every other test in this file exercises trustedAward or markExtended
+    directly, which is exactly why the gap this covers went unnoticed: a point
+    the interface showed as settled and the scorer never received. A unit test on
+    each half passes happily while the two disagree about who owns the point.
+    These go through markQuestion, the way a stored answer is actually re-marked.
+  */
+  const scheme = ratedScheme();
+
+  function question(): GeneratedQuestion {
+    return {
+      id: "econ-1.1.1-rated",
+      template: "rated-explain",
+      chapterId: "econ-1.1",
+      specRef: "econ-1.1",
+      skillIds: ["econ-1.1"],
+      difficulty: 0,
+      tier: 3,
+      prompt: "Explain what opportunity cost means.",
+      format: { kind: "extended", scheme },
+      answer: "The value of the next best alternative.",
+      marks: scheme.availableMarks ?? 3,
+      solution: [{ label: "Scheme", work: "Self-marked." }],
+      takeaway: "Opportunity cost is the next best alternative.",
+      assessesMastery: false,
+    };
+  }
+
+  it("awards an auto point the learner never ticked", () => {
+    // The learner writes the terms and ticks nothing. The interface would be
+    // showing that point as checked on their behalf.
+    const result = markQuestion(question(), [
+      "The cost is the value of the next best alternative.",
+    ]);
+    // 1 factual point out of 3 available; the rating goes unclaimed.
+    assert.equal(result.marks, 3);
+    assert.equal(result.awardedMarks, 1);
+    assert.equal(result.score, round(1 / 3, 4));
+  });
+
+  it("withholds it when the evidence is absent", () => {
+    const result = markQuestion(question(), ["It is the cost of doing something."]);
+    assert.equal(result.awardedMarks, 0);
+  });
+
+  it("never awards rating marks however strong the answer", () => {
+    const thorough = markQuestion(question(), [
+      "The cost is the value of the next best alternative, and the reasoning is laid out clearly throughout.",
+      ratingToken(3),
+    ]);
+    // 1 point of evidence plus the top rating step's 2 marks.
+    assert.equal(thorough.awardedMarks, 3);
+
+    // With no rating token at all, only the evidence point is claimable.
+    const unrated = markQuestion(question(), [
+      "The cost is the value of the next best alternative.",
+    ]);
+    assert.equal(unrated.awardedMarks, 1);
+  });
+
+  it("does not read an index out of the response as prose", () => {
+    /*
+      Guards the essay-detection helper. If a bare claim were mistaken for
+      writing, its digits would be scanned for keywords and a point could be
+      awarded with no answer behind it. The auto point's keyword is "7" so that a
+      response of ["7", "1"] triggers exactly that if the detector regresses: "7"
+      would be read as prose, award point 0, and the total would come out 2
+      instead of 1.
+    */
+    const digits: MarkScheme = {
+      command: "explain",
+      points: [
+        { label: "States the figure", detail: "The figure is 7.", marks: 1, auto: { keywords: ["7"] } },
+        { label: "Explains it", detail: "The figure matters because.", marks: 1 },
+      ],
+      totalMarks: 2,
+    };
+    const result = markQuestion(
+      { ...question(), format: { kind: "extended", scheme: digits }, marks: 2 },
+      ["7", "1"],
+    );
+    // Only point 1, which the learner claimed. Point 0 would need real evidence.
+    assert.equal(result.awardedMarks, 1);
+  });
+
+  it("reaches the same score when the stored answer is re-marked", () => {
+    const response = ["The cost is the value of the next best alternative.", ratingToken(3)];
+    const first = markQuestion(question(), response);
+    const second = markQuestion(question(), response);
+    assert.deepEqual(second, first);
   });
 });
 
